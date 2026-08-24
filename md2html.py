@@ -126,10 +126,9 @@ hr { border: none; border-top: 1px solid var(--border); }
 
 /* ---- 定理环境 ---- */
 .thm-env { margin: 1.2em 0; padding: .8em 1.1em; border-radius: 8px;
-  background: var(--card); border-left: 4px solid var(--accent); }
+  background: var(--card); border-left: 4px solid var(--accent); font-style: normal; }
 .thm-env.proof { background: transparent; border-left-color: var(--border); }
-.thm-head { font-weight: 700; font-style: italic; }
-.thm-env.proof .thm-head { font-style: normal; }
+.thm-head { font-weight: 700; font-style: normal; }
 .thm-title { font-weight: 400; }
 .thm-body { margin-top: .35em; }
 .qed { float: right; }
