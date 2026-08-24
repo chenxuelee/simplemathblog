@@ -26,6 +26,12 @@ jobs:
         with:
           python-version: '3.11'
       - run: python3 -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: python3 blog.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
