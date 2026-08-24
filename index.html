@@ -28,6 +28,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-s
 #toolbar button { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
 #toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+#toolbar .spacer { flex: 1; }
 #file-input { display: none; }
 #status { color: var(--muted); font-size: 13px; }
 #container { max-width: 880px; margin: 0 auto; padding: 32px 28px 120px; line-height: 1.75; font-size: 16px; }
@@ -47,6 +48,15 @@ th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 th { background: var(--card); }
 tr:nth-child(even) td { background: var(--card); }
 img { max-width: 100%; }
+.cover { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; margin-top: 1em; }
+img.zoomable { cursor: zoom-in; }
+.image-lightbox { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  padding: 30px; background: rgba(0,0,0,.82); cursor: zoom-out; }
+.image-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+body.reading-wide #container { max-width: 1120px; }
+body.reading-large #container { font-size: 18px; }
+.reading-progress { position: fixed; top: 0; left: 0; z-index: 20; height: 3px; width: 0;
+  background: var(--accent); transition: width .08s linear; }
 hr { border: none; border-top: 1px solid var(--border); }
 .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 2px; }
 .math-error { color: #ef4444; background: rgba(239,68,68,.08); border-radius: 6px; padding: 2px 6px; font-family: monospace; font-size: .85em; }
@@ -84,14 +94,19 @@ a.ref-link { color: var(--accent); text-decoration: none; border-bottom: 1px dot
   <button id="btn-open">📂 打开文件</button>
   <button id="btn-edit">✏️ 编辑源码</button>
   <button id="btn-print">🖨️ 导出 PDF</button>
+  <button id="btn-width" title="切换宽版排版">↔ 宽度</button>
+  <button id="btn-size" title="切换大字号">A 字号</button>
+  <span class="spacer"></span>
   <input type="file" id="file-input" accept=".md,.markdown,.txt,.tex">
   <span id="status">内置演示文档 · 支持拖拽 .md 文件进窗口</span>
 </div>
+<div class="reading-progress" id="reading-progress"></div>
 
 <div id="container" class="markdown-body"></div>
 <textarea id="editor" spellcheck="false"></textarea>
 
 <script>
+// ============ EXPORTABLE_RENDER_PIPELINE_START ============
 // ============ 核心：数学感知的 Markdown 渲染管线 ============
 // 关键点：在 marked 解析前，先把数学区域提取为占位符，
 // 避免 $...$ 内部的 *、_、\\ 等被 Markdown 引擎破坏。
@@ -161,7 +176,7 @@ function restoreMath(html) {
         displayMode: m.display,
         throwOnError: false,
         strict: false,
-        trust: true,
+        trust: false,
         macros: MACROS,
       }).replace("katex-display", m.display ? "katex-display eq-block" : "katex");
     } catch (e) {
@@ -244,14 +259,17 @@ function renderTheorems(html) {
         if (t.label) refTable[t.label] = { number: num, kind: t.kind, zh: meta.zh };
       }
     }
-    const bodyHtml = restoreMath(protectMath(processCrossrefs(t.body)));
+    const bodyHtml = restoreMath(marked.parse(protectMath(processCrossrefs(t.body))));
     const qed = t.isProof ? '<span class="qed">∎</span>' : "";
     return `<div class="thm-env ${t.kind}">${headName}<div class="thm-body">${bodyHtml}</div>${qed}</div>`;
   });
 }
 function starredSuffix(meta){ return ""; }
 function renderInlineText(s){ return esc(s); }
-function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
+}
 
 // ============ 交叉引用 ============
 // 处理 \ref{...}, \eqref{...}, \autoref{...} —— 在公式渲染前替换为占位，
@@ -291,17 +309,16 @@ function resolveCrossrefs(root) {
 }
 
 // marked 配置
+const markdownRenderer = new marked.Renderer();
+markdownRenderer.html = raw => esc(raw);
 marked.setOptions({
   gfm: true, breaks: false,
+  renderer: markdownRenderer,
   highlight: (code, lang) => {
     try { return lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value; }
     catch { return code; }
   },
 });
-
-const container = document.getElementById("container");
-const editor = document.getElementById("editor");
-const statusEl = document.getElementById("status");
 
 // ============ Front Matter (YAML) ============
 // 解析文档开头的 --- ... --- 元数据块。支持标量、行内数组 [a, b]、
@@ -338,11 +355,11 @@ function stripQuotes(s) {
 }
 
 function renderFrontMatter(meta) {
-  const esc2 = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const esc2 = esc;
   let html = '<div class="fm-card">';
   if (meta.title) html += `<h1>${esc2(meta.title)}</h1>`;
   const items = [];
-  for (const k of ["author", "date", "affiliation", "email"]) {
+  for (const k of ["author", "date", "updated", "series", "affiliation", "email"]) {
     if (meta[k]) items.push(`<span><b>${esc2(k)}</b>: ${esc2(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k])}</span>`);
   }
   if (items.length) html += `<div class="fm-meta">${items.join("")}</div>`;
@@ -350,8 +367,32 @@ function renderFrontMatter(meta) {
     const tags = Array.isArray(meta.tags) ? meta.tags : String(meta.tags).split(/[,，]\s*/);
     if (tags.length) html += `<div style="margin-top:.5em"><span class="fm-tags">${tags.map(t=>`<span class="fm-tag">${esc2(t)}</span>`).join("")}</span></div>`;
   }
+  if (meta.cover) html += `<img class="cover zoomable" src="${esc2(meta.cover)}" alt="${esc2(meta.title || "封面")}">`;
   html += "</div>";
   return html;
+}
+
+// 轻量写作扩展：:::note / :::tip / :::warning 块会变为可移植的引用提示块。
+function preprocessMarkdown(src) {
+  const labels = { note: "注", tip: "提示", warning: "注意" };
+  return src.replace(/^:::(note|tip|warning)(?:\s+([^\n]+))?\n([\s\S]*?)^:::\s*$/gm,
+    (_, kind, title, body) => `> **${labels[kind]}${title ? "：" + title.trim() : ""}**\n>\n` +
+      body.trim().split("\n").map(line => `> ${line}`).join("\n"));
+}
+
+function enhanceImages(root) {
+  root.querySelectorAll("img").forEach(img => {
+    img.loading = "lazy";
+    img.classList.add("zoomable");
+    img.onclick = () => {
+      const overlay = document.createElement("div");
+      overlay.className = "image-lightbox";
+      const full = document.createElement("img");
+      full.src = img.currentSrc || img.src; full.alt = img.alt;
+      overlay.append(full); overlay.onclick = () => overlay.remove();
+      document.body.append(overlay);
+    };
+  });
 }
 
 // toc: true —— 从渲染后的 HTML 收集 h2/h3 生成目录（在标题上加锚点）
@@ -362,8 +403,7 @@ function buildToc(container, insertBeforeEl) {
   const lis = [];
   heads.forEach(h => {
     if (!h.id) h.id = "sec-" + (++i);
-    const dot = document.createElement("span");
-    lis.push(`<li style="margin-left:${h.tagName === "H3" ? "1.2em" : "0"}"><a href="#${h.id}">${h.textContent}</a></li>`);
+    lis.push(`<li style="margin-left:${h.tagName === "H3" ? "1.2em" : "0"}"><a href="#${esc(h.id)}">${esc(h.textContent)}</a></li>`);
   });
   insertBeforeEl.insertAdjacentHTML("beforebegin",
     `<div class="toc-box"><div class="toc-title">目录</div><ol>${lis.join("")}</ol></div>`);
@@ -377,7 +417,7 @@ function render(src) {
   if (meta && meta.title) document.title = meta.title + " · MD Reader";
   else document.title = "Enhanced Markdown Reader";
   // 管线顺序：定理提取 → 交叉引用占位 → 数学保护 → marked 解析
-  let s = extractTheorems(body);
+  let s = extractTheorems(preprocessMarkdown(body));
   s = processCrossrefs(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
@@ -392,6 +432,7 @@ function render(src) {
   }
   renderBareEnvironments();
   resolveCrossrefs(container);
+  enhanceImages(container);
 }
 
 // 对未包裹 $ 的 \begin{equation}/align/gather 等做兜底渲染
@@ -400,19 +441,36 @@ function renderBareEnvironments() {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const targets = [];
   while (walker.nextNode()) {
-    if (ENV_RE.test(walker.currentNode.textContent)) targets.push(walker.currentNode);
+    if (!walker.currentNode.parentElement.closest("pre, code") && ENV_RE.test(walker.currentNode.textContent)) targets.push(walker.currentNode);
     ENV_RE.lastIndex = 0;
   }
   targets.forEach(node => {
-    const span = document.createElement("span");
-    try {
-      span.innerHTML = katex.renderToString(node.textContent, { displayMode: true, throwOnError: false, strict: false, macros: MACROS });
-      node.parentNode.replaceChild(span, node);
-    } catch {}
+    const fragment = document.createDocumentFragment();
+    const text = node.textContent;
+    const re = new RegExp(ENV_RE.source, "g");
+    let last = 0, match;
+    while ((match = re.exec(text))) {
+      fragment.append(document.createTextNode(text.slice(last, match.index)));
+      const span = document.createElement("span");
+      try {
+        span.innerHTML = katex.renderToString(match[0].replace(/^\u0000|\u0000$/g, ""),
+          { displayMode: true, throwOnError: false, strict: false, trust: false, macros: MACROS });
+        fragment.append(span);
+      } catch {
+        fragment.append(document.createTextNode(match[0]));
+      }
+      last = re.lastIndex;
+    }
+    fragment.append(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(fragment, node);
   });
 }
 
+// ============ EXPORTABLE_RENDER_PIPELINE_END ============
 // ============ UI ============
+const container = document.getElementById("container");
+const editor = document.getElementById("editor");
+const statusEl = document.getElementById("status");
 const DEMO = `---
 title: 增强数学 Markdown 阅读器
 author: YanTao Wang
@@ -541,6 +599,19 @@ document.getElementById("btn-edit").onclick = function () {
   else { editor.style.display = "block"; container.style.display = "none"; this.textContent = "👁️ 预览"; editor.value = editor.value || currentSrc; }
 };
 document.getElementById("btn-print").onclick = () => window.print();
+function toggleReadingClass(name) {
+  document.body.classList.toggle(name);
+  localStorage.setItem(name, document.body.classList.contains(name) ? "1" : "0");
+}
+["reading-wide", "reading-large"].forEach(name => {
+  if (localStorage.getItem(name) === "1") document.body.classList.add(name);
+});
+document.getElementById("btn-width").onclick = () => toggleReadingClass("reading-wide");
+document.getElementById("btn-size").onclick = () => toggleReadingClass("reading-large");
+window.addEventListener("scroll", () => {
+  const total = document.documentElement.scrollHeight - innerHeight;
+  document.getElementById("reading-progress").style.width = `${total > 0 ? scrollY / total * 100 : 0}%`;
+}, { passive: true });
 editor.addEventListener("input", () => { currentSrc = editor.value; render(currentSrc); });
 
 let currentSrc = DEMO;

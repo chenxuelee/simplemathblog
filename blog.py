@@ -24,11 +24,25 @@ import shutil
 import sys
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).parent))
-from md2html import extract_pipeline_js
+from md2html import extract_pipeline_js, json_for_script
 
 HERE = Path(__file__).parent.resolve()
+
+
+def plain_text(text: str) -> str:
+    """用于摘要、搜索和 RSS 的保守纯文本版本。"""
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = re.sub(r"[$\\{}]|\\begin\{[^}]*\}|\\end\{[^}]*\}|[#*`>\[\]()-]", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def rewrite_local_links(text: str) -> str:
+    """博客根目录中将 Markdown 文章链接改为生成的 HTML 链接。"""
+    return re.sub(r"(\]\()([^:)#]+)\.(?:md|markdown)(#[^)]+)?(\))",
+                  lambda m: f"{m.group(1)}{m.group(2)}.html{m.group(3) or ''}{m.group(4)}", text)
 
 # ---------------------------------------------------------------- front matter 解析（与阅读器一致的 Python 侧）
 
@@ -65,11 +79,11 @@ def parse_fm(text):
 def load_posts(posts_dir: Path):
     posts = []
     for f in sorted(posts_dir.glob("*.md")) + sorted(posts_dir.glob("*.markdown")):
-        raw = f.read_text(encoding="utf-8")
+        raw = rewrite_local_links(f.read_text(encoding="utf-8"))
         meta, body = parse_fm(raw)
         if meta.get("draft", "").lower() in ("true", "yes"):
             continue
-        slug = f.stem
+        slug = str(meta.get("slug") or f.stem)
         title = str(meta.get("title") or slug)
         d = str(meta.get("date") or date.today().isoformat())
         tags = meta.get("tags") or []
@@ -78,10 +92,14 @@ def load_posts(posts_dir: Path):
         # 摘要：excerpt 字段优先，否则取正文前 120 字符（剥掉语法标记）
         excerpt = meta.get("excerpt")
         if not excerpt:
-            plain = re.sub(r"[$\\{}]|\\begin\{[^}]*\}|\\end\{[^}]*\}|[#*`>\[\]()-]", "", body)
-            excerpt = re.sub(r"\s+", " ", plain).strip()[:120] + ("…" if len(plain) > 120 else "")
+            plain = plain_text(body)
+            excerpt = plain[:120] + ("…" if len(plain) > 120 else "")
         posts.append({"slug": slug, "title": title, "date": d, "tags": tags,
-                      "meta": meta, "body": raw, "excerpt": excerpt})
+                      "meta": meta, "body": raw, "excerpt": excerpt,
+                      "description": str(meta.get("description") or excerpt),
+                      "updated": str(meta.get("updated") or d),
+                      "cover": str(meta.get("cover") or ""),
+                      "series": str(meta.get("series") or "")})
     posts.sort(key=lambda p: p["date"], reverse=True)
     return posts
 
@@ -109,6 +127,19 @@ header.site .brand { font-weight:800; font-size:18px; color:var(--fg); letter-sp
 header.site nav { display:flex; gap:16px; font-size:14px; }
 header.site nav a { color:var(--muted); padding:4px 8px; border-radius:6px; }
 header.site nav a:hover { color:var(--accent); background:var(--card); }
+.search-box { max-width:760px; margin:28px auto 0; }
+.search-box input { width:100%; padding:11px 13px; border:1px solid var(--border);
+  background:var(--bg); color:var(--fg); border-radius:9px; font:inherit; }
+.search-results { list-style:none; padding:0; margin:10px 0; }
+.search-results li { padding:9px 0; border-bottom:1px dashed var(--border); }
+.post-nav,.related { border-top:1px solid var(--border); margin-top:34px; padding-top:20px; }
+.post-nav { display:flex; justify-content:space-between; gap:18px; }
+.post-nav a { max-width:48%; }
+.cover { width:100%; max-height:360px; object-fit:cover; border-radius:12px; margin:0 0 1.4em; }
+img.zoomable { cursor:zoom-in; }
+.image-lightbox { position:fixed; inset:0; z-index:30; display:grid; place-items:center;
+  padding:30px; background:rgba(0,0,0,.8); cursor:zoom-out; }
+.image-lightbox img { max-width:100%; max-height:100%; object-fit:contain; }
 
 /* 首页文章列表 */
 .post-list { list-style:none; margin:36px auto; padding:0; max-width:760px; }
@@ -209,7 +240,7 @@ def page_shell(title: str, body: str, active: str = "") -> str:
 <body>
 <header class="site"><div class="wrap">
   <a class="brand" href="index.html">📝 My Blog</a>
-  <nav>{navlink('index.html','首页','index')}{navlink('tags.html','归档','tags')}</nav>
+  <nav>{navlink('index.html','首页','index')}{navlink('tags.html','归档','tags')}{navlink('search.html','搜索','search')}</nav>
 </div></header>
 {body}
 <footer class="site">Powered by Enhanced Markdown Reader · 数学 · 定理 · Crossref</footer>
@@ -228,13 +259,17 @@ POST_TEMPLATE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__TITLE__</title>
+<meta name="description" content="__DESCRIPTION__">
+<meta property="og:title" content="__TITLE__">
+<meta property="og:description" content="__DESCRIPTION__">
+__COVER_META__
 __HEAD__
 <style>__CSS__</style>
 </head>
 <body>
 <header class="site"><div class="wrap">
   <a class="brand" href="index.html">📝 My Blog</a>
-  <nav><a href="index.html">首页</a><a href="tags.html">归档</a></nav>
+  <nav><a href="index.html">首页</a><a href="tags.html">归档</a><a href="search.html">搜索</a></nav>
 </div></header>
 <div class="wrap"><div id="layout">
   <aside id="sidebar">
@@ -242,25 +277,24 @@ __HEAD__
     <div style="color:var(--muted);font-size:12px;margin-bottom:12px">__SIDEBAR_SUB__</div>
     <nav id="toc"></nav>
   </aside>
-  <div id="main"><article id="container"></article></div>
+  <div id="main"><article id="container"></article>__POST_NAV__</div>
 </div></div>
 <footer class="site">Powered by Enhanced Markdown Reader · __DATE__</footer>
-<script>
 __CDN__
-</script>
 <script>
 __PIPELINE__
 
 // ==================== 博客文章渲染 ====================
 const container = document.getElementById("container");
 const SRC = __SRC_JSON__;
+const COVER_HTML = __COVER_HTML__;
 
 (function renderPost(src) {
   thmStore = []; crefStore = [];
   for (const k in counters) delete counters[k];
   const { meta, body } = parseFrontMatter(src);
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(body);
+  let s = extractTheorems(preprocessMarkdown(body));
   s = processCrossrefs(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
@@ -268,8 +302,10 @@ const SRC = __SRC_JSON__;
   html = renderTheorems(html);
   if (meta) html = renderFrontMatter(meta) + html;
   container.innerHTML = html;
+  if (COVER_HTML) container.insertAdjacentHTML("afterbegin", COVER_HTML);
   renderBareEnvironments();
   resolveCrossrefs(container);
+  enhanceImages(container);
   // 左侧目录（toc:false 关闭）
   const show = !meta || !/^(false|no)$/i.test(String(meta.toc));
   const nav = document.getElementById("toc");
@@ -277,7 +313,7 @@ const SRC = __SRC_JSON__;
   let i = 0; const lis = [];
   container.querySelectorAll("h2, h3").forEach(h => {
     if (!h.id) h.id = "sec-" + (++i);
-    lis.push(`<a class="${h.tagName === "H3" ? "lv3" : ""}" href="#${h.id}">${h.textContent}</a>`);
+    lis.push(`<a class="${h.tagName === "H3" ? "lv3" : ""}" href="#${esc(h.id)}">${esc(h.textContent)}</a>`);
   });
   nav.innerHTML = lis.join("") || '<span style="color:var(--muted)">（无章节）</span>';
 })(SRC);
@@ -290,13 +326,27 @@ def esc(s):
     return html_mod.escape(str(s))
 
 
+def sync_assets(posts_dir: Path, out_dir: Path):
+    """复制 content/assets；文章可直接写 ![](assets/example.png)。"""
+    assets = posts_dir / "assets"
+    if assets.is_dir():
+        shutil.copytree(assets, out_dir / "assets", dirs_exist_ok=True)
+
+
+def related_posts(post, posts, limit=3):
+    tags = set(post["tags"])
+    ranked = [p for p in posts if p["slug"] != post["slug"] and tags.intersection(p["tags"])]
+    ranked.sort(key=lambda p: (-len(tags.intersection(p["tags"])), p["date"]), reverse=False)
+    return ranked[:limit]
+
+
 def build_index(posts, out_dir: Path):
     items = []
     for p in posts:
         tags = " ".join(
             f'<a class="tag" href="tags.html#{esc(t)}">{esc(t)}</a>' for t in p["tags"])
         items.append(f"""<li class="post-item">
-  <h2><a href="{p['slug']}.html">{esc(p['title'])}</a></h2>
+  <h2><a href="{esc(p['slug'])}.html">{esc(p['title'])}</a></h2>
   <div class="post-date">{esc(p['date'])}{(" &nbsp;·&nbsp; " + tags) if tags else ""}</div>
   <div class="post-excerpt">{esc(p["excerpt"])}</div>
 </li>""")
@@ -308,10 +358,53 @@ def build_index(posts, out_dir: Path):
                      for t, n in sorted(tagcount.items(), key=lambda x: -x[1]))
     body = f"""
 <div class="wrap">
+  <div class="search-box"><input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autocomplete="off"><ul id="search-results" class="search-results"></ul></div>
   <ul class="post-list">{"".join(items) or "<li class='post-item'>暂无文章 — 在 content/ 中添加 .md 后重新构建。</li>"}</ul>
   <div class="tagcloud"><h3>🏷️ 标签</h3>{cloud}</div>
 </div>"""
-    (out_dir / "index.html").write_text(page_shell("My Blog", body, "index"), encoding="utf-8")
+    script = """<script>
+const input=document.getElementById('site-search'), results=document.getElementById('search-results');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+let searchIndex=[];
+fetch('search-index.json').then(r=>r.json()).then(x=>searchIndex=x).catch(()=>{});
+input.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();
+ const found=q?searchIndex.filter(p=>p.search.includes(q)).slice(0,8):[];
+ results.innerHTML=found.map(p=>`<li><a href="${esc(p.url)}">${esc(p.title)}</a><div class="post-excerpt">${esc(p.excerpt)}</div></li>`).join('');});
+</script>"""
+    (out_dir / "index.html").write_text(page_shell("My Blog", body + script, "index"), encoding="utf-8")
+
+
+def build_search(posts, out_dir: Path):
+    body = """<div class="wrap"><div class="search-box"><h1>搜索</h1>
+<input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autofocus>
+<ul id="search-results" class="search-results"></ul></div></div>
+<script>const input=document.getElementById('site-search'),results=document.getElementById('search-results');const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');let data=[];
+fetch('search-index.json').then(r=>r.json()).then(x=>{data=x;run();});
+function run(){const q=input.value.trim().toLowerCase(),found=q?data.filter(p=>p.search.includes(q)):data;
+results.innerHTML=found.map(p=>`<li><a href="${esc(p.url)}">${esc(p.title)}</a><div class="post-excerpt">${esc(p.excerpt)}</div></li>`).join('');}
+input.addEventListener('input',run);</script>"""
+    (out_dir / "search.html").write_text(page_shell("搜索 · My Blog", body, "search"), encoding="utf-8")
+
+
+def build_search_index(posts, out_dir: Path):
+    data = [{"title": p["title"], "excerpt": p["excerpt"], "url": f"{p['slug']}.html",
+             "search": " ".join([p["title"], p["excerpt"], *p["tags"]]).lower()} for p in posts]
+    (out_dir / "search-index.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def build_rss(posts, out_dir: Path):
+    items = "".join(f"<item><title>{esc(p['title'])}</title><link>{quote(p['slug'])}.html</link>"
+                    f"<guid>{quote(p['slug'])}.html</guid><pubDate>{esc(p['date'])}</pubDate>"
+                    f"<description>{esc(p['description'])}</description></item>" for p in posts)
+    rss = f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>My Blog</title><link>./</link><description>数学博客</description>{items}</channel></rss>'
+    (out_dir / "rss.xml").write_text(rss, encoding="utf-8")
+
+
+def build_sitemap(posts, out_dir: Path):
+    urls = ["index.html", "tags.html", "search.html", *[f"{p['slug']}.html" for p in posts]]
+    xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(
+        f"<url><loc>{quote(url)}</loc></url>" for url in urls) + "</urlset>"
+    (out_dir / "sitemap.xml").write_text(xml, encoding="utf-8")
 
 
 def build_tags(posts, out_dir: Path):
@@ -321,7 +414,7 @@ def build_tags(posts, out_dir: Path):
             bytag.setdefault(t, []).append(p)
     groups = []
     for t, ps in sorted(bytag.items()):
-        lis = "".join(f'<li><a href="{p["slug"]}.html">{esc(p["title"])}</a>'
+        lis = "".join(f'<li><a href="{esc(p["slug"])}.html">{esc(p["title"])}</a>'
                       f'<span class="d">{esc(p["date"])}</span></li>' for p in ps)
         groups.append(f'<div class="archive-group" id="{esc(t)}"><h3>🏷️ {esc(t)}</h3>'
                       f'<ul class="archive-list">{lis}</ul></div>')
@@ -329,18 +422,28 @@ def build_tags(posts, out_dir: Path):
     (out_dir / "tags.html").write_text(page_shell("归档 · My Blog", body, "tags"), encoding="utf-8")
 
 
-def build_post(p, pipeline_js, out_dir: Path):
+def build_post(p, pipeline_js, out_dir: Path, newer=None, older=None, related=()):
     sub = f"{p['date']}"
+    cover = f'<img class="cover" src="{esc(p["cover"])}" alt="{esc(p["title"])}">' if p["cover"] else ""
+    nav = '<nav class="post-nav">' + (f'<a href="{esc(newer["slug"])}.html">← {esc(newer["title"])}</a>' if newer else '<span></span>') + (f'<a href="{esc(older["slug"])}.html">{esc(older["title"])} →</a>' if older else '<span></span>') + '</nav>'
+    related_html = ""
+    if related:
+        related_html = '<section class="related"><b>相关文章</b><ul>' + ''.join(
+            f'<li><a href="{esc(x["slug"])}.html">{esc(x["title"])}</a></li>' for x in related) + '</ul></section>'
     html = (POST_TEMPLATE
             .replace("__TITLE__", esc(p["title"]))
+            .replace("__DESCRIPTION__", esc(p["description"]))
+            .replace("__COVER_META__", f'<meta property="og:image" content="{esc(p["cover"])}">' if p["cover"] else "")
             .replace("__SIDEBAR_TITLE__", esc(p["title"]))
             .replace("__SIDEBAR_SUB__", esc(sub))
-            .replace("__DATE__", esc(p["date"]))
+            .replace("__DATE__", esc(p["updated"]))
+            .replace("__POST_NAV__", nav + related_html)
             .replace("__HEAD__", '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">')
             .replace("__CSS__", BASE_CSS)
             .replace("__CDN__", CDN_AND_PIPELINE)
             .replace("__PIPELINE__", pipeline_js)
-            .replace("__SRC_JSON__", json.dumps(p["body"], ensure_ascii=False)))
+            .replace("__COVER_HTML__", json_for_script(cover))
+            .replace("__SRC_JSON__", json_for_script(p["body"])))
     (out_dir / f"{p['slug']}.html").write_text(html, encoding="utf-8")
 
 
@@ -358,13 +461,21 @@ def main():
     pipeline_js = extract_pipeline_js(HERE / "index.html")
     posts = load_posts(posts_dir)
 
+    sync_assets(posts_dir, out_dir)
     build_index(posts, out_dir)
     build_tags(posts, out_dir)
-    for p in posts:
-        build_post(p, pipeline_js, out_dir)
+    build_search(posts, out_dir)
+    build_search_index(posts, out_dir)
+    build_rss(posts, out_dir)
+    build_sitemap(posts, out_dir)
+    for i, p in enumerate(posts):
+        build_post(p, pipeline_js, out_dir,
+                   newer=posts[i - 1] if i else None,
+                   older=posts[i + 1] if i + 1 < len(posts) else None,
+                   related=related_posts(p, posts))
 
     print(f"✅ 构建完成: {out_dir}")
-    print(f"   文章 {len(posts)} 篇 → index.html / tags.html / " +
+    print(f"   文章 {len(posts)} 篇 → index.html / tags.html / search.html / rss.xml / sitemap.xml / " +
           " ".join(p["slug"] + ".html" for p in posts[:3]) + (" …" if len(posts) > 3 else ""))
 
 

@@ -16,6 +16,7 @@ YAML Front Matter）转换为单个独立 HTML 文件，目录渲染在左侧边
 """
 
 import argparse
+import html as html_mod
 import json
 import re
 import sys
@@ -27,26 +28,23 @@ DEFAULT_READER = Path(__file__).with_name("index.html")
 # ---------------------------------------------------------------- reader 管线提取
 
 def extract_pipeline_js(reader_path: Path) -> str:
-    """从 index.html 抽取渲染管线 <script>（截至 UI 部分之前）。"""
+    """从 index.html 中由显式标记圈出的渲染管线抽取 JavaScript。"""
     html = reader_path.read_text(encoding="utf-8")
-    m = re.search(r"<script>\s*// ============ 宏与管线([\s\S]*?)</script>", html)
+    m = re.search(
+        r"// ============ EXPORTABLE_RENDER_PIPELINE_START ============"
+        r"([\s\S]*?)"
+        r"// ============ EXPORTABLE_RENDER_PIPELINE_END ============", html)
     if not m:
-        # 兜底：取最后一个内联 <script> 并截到 UI 标记处
-        blocks = re.findall(r"<script>([\s\S]*?)</script>", html)
-        if not blocks:
-            sys.exit(f"错误：在 {reader_path} 中找不到渲染管线脚本")
-        js = blocks[-1]
-        cut = js.find("// ============ UI")
-        if cut != -1:
-            js = js[:cut]
-        # 阅读器的 DOM 锚点声明位于脚本中部，导出页有自己的元素，剔除之
-        js = re.sub(
-            r"const container = document\.getElementById\(\"container\"\);\s*"
-            r"const editor = document\.getElementById\(\"editor\"\);\s*"
-            r"const statusEl = document\.getElementById\(\"status\"\);",
-            "", js)
-        return js.strip()
+        sys.exit(f"错误：在 {reader_path} 中找不到导出渲染管线标记")
     return m.group(1).strip()
+
+
+def json_for_script(value: str) -> str:
+    """安全嵌入普通 script：防止 Markdown 中的 </script> 结束脚本。"""
+    return (json.dumps(value, ensure_ascii=False)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
 
 # ---------------------------------------------------------------- 导出模板
 
@@ -117,6 +115,10 @@ th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 th { background: var(--card); }
 tr:nth-child(even) td { background: var(--card); }
 img { max-width: 100%; }
+img.zoomable { cursor: zoom-in; }
+.image-lightbox { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  padding: 30px; background: rgba(0,0,0,.82); cursor: zoom-out; }
+.image-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
 hr { border: none; border-top: 1px solid var(--border); }
 .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 2px; }
 .math-error { color: #ef4444; background: rgba(239,68,68,.08); border-radius: 6px;
@@ -142,6 +144,7 @@ a.ref-link { color: var(--accent); text-decoration: none;
 .fm-tags { display: inline-flex; gap: .45em; flex-wrap: wrap; }
 .fm-tag { background: var(--accent); color: #fff; opacity: .85;
   border-radius: 999px; padding: .05em .7em; font-size: .82em; }
+.cover { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; margin-top: 1em; }
 
 @media print {
   #sidebar { display: none; }
@@ -171,7 +174,7 @@ function renderExport(src) {
   for (const k in counters) delete counters[k];
   const { meta, body } = parseFrontMatter(src);
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(body);
+  let s = extractTheorems(preprocessMarkdown(body));
   s = processCrossrefs(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
@@ -181,6 +184,7 @@ function renderExport(src) {
   container.innerHTML = html;
   renderBareEnvironments();
   resolveCrossrefs(container);
+  enhanceImages(container);
   buildSidebarToc(meta);
 }
 
@@ -194,7 +198,7 @@ function buildSidebarToc(meta) {
   container.querySelectorAll("h2, h3").forEach(h => {
     if (!h.id) h.id = "sec-" + (++i);
     const lv = h.tagName === "H3" ? "lv3" : "";
-    lis.push(`<a class="${lv}" href="#${h.id}">${h.textContent}</a>`);
+    lis.push(`<a class="${lv}" href="#${esc(h.id)}">${esc(h.textContent)}</a>`);
   });
   nav.innerHTML = lis.join("") ||
     '<span style="color:var(--muted);font-size:13px">（无章节标题）</span>';
@@ -223,11 +227,11 @@ def convert(md_path: Path, out_path: Path, reader_path: Path) -> Path:
     sub = f"{md_path.name} · 导出于 {date.today().isoformat()}"
 
     html = (TEMPLATE
-            .replace("__TITLE__", title)
-            .replace("__SIDEBAR_TITLE__", title)
-            .replace("__SIDEBAR_SUB__", sub)
+            .replace("__TITLE__", html_mod.escape(title, quote=True))
+            .replace("__SIDEBAR_TITLE__", html_mod.escape(title, quote=True))
+            .replace("__SIDEBAR_SUB__", html_mod.escape(sub, quote=True))
             .replace("__PIPELINE_JS__", pipeline)
-            .replace("__SRC_JSON__", json.dumps(src, ensure_ascii=False)))
+            .replace("__SRC_JSON__", json_for_script(src)))
     out_path.write_text(html, encoding="utf-8")
     return out_path
 

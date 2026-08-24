@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>My Blog</title>
+<title>搜索 · My Blog</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 <style>
@@ -124,30 +124,16 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
 <body>
 <header class="site"><div class="wrap">
   <a class="brand" href="index.html">📝 My Blog</a>
-  <nav><a href="index.html" style="color:var(--accent);font-weight:600">首页</a><a href="tags.html">归档</a><a href="search.html">搜索</a></nav>
+  <nav><a href="index.html">首页</a><a href="tags.html">归档</a><a href="search.html" style="color:var(--accent);font-weight:600">搜索</a></nav>
 </div></header>
-
-<div class="wrap">
-  <div class="search-box"><input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autocomplete="off"><ul id="search-results" class="search-results"></ul></div>
-  <ul class="post-list"><li class="post-item">
-  <h2><a href="fourier-series.html">傅里叶级数与 Dirichlet 收敛</a></h2>
-  <div class="post-date">2026-08-23 &nbsp;·&nbsp; <a class="tag" href="tags.html#分析">分析</a> <a class="tag" href="tags.html#傅里叶">傅里叶</a> <a class="tag" href="tags.html#教学">教学</a></div>
-  <div class="post-excerpt">傅里叶级数 定义 begindefinitiondef:fs傅里叶级数 设 f 是 2pi 周期函数，其傅里叶级数为 fx sim sum_n=infty^infty c_n e^inx, quad c_n = frac12piint_pi…</div>
-</li><li class="post-item">
-  <h2><a href="banach-fixed-point.html">Banach 不动点定理及其应用</a></h2>
-  <div class="post-date">2026-08-20 &nbsp;·&nbsp; <a class="tag" href="tags.html#分析">分析</a> <a class="tag" href="tags.html#不动点">不动点</a></div>
-  <div class="post-excerpt">压缩映射原理是度量空间理论的基石，我们给出完整证明并用它建立 Picard 迭代收敛性。</div>
-</li></ul>
-  <div class="tagcloud"><h3>🏷️ 标签</h3><a class="tag" href="tags.html#分析">分析 ×2</a> <a class="tag" href="tags.html#傅里叶">傅里叶 ×1</a> <a class="tag" href="tags.html#教学">教学 ×1</a> <a class="tag" href="tags.html#不动点">不动点 ×1</a></div>
-</div><script>
-const input=document.getElementById('site-search'), results=document.getElementById('search-results');
-const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-let searchIndex=[];
-fetch('search-index.json').then(r=>r.json()).then(x=>searchIndex=x).catch(()=>{});
-input.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();
- const found=q?searchIndex.filter(p=>p.search.includes(q)).slice(0,8):[];
- results.innerHTML=found.map(p=>`<li><a href="${esc(p.url)}">${esc(p.title)}</a><div class="post-excerpt">${esc(p.excerpt)}</div></li>`).join('');});
-</script>
+<div class="wrap"><div class="search-box"><h1>搜索</h1>
+<input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autofocus>
+<ul id="search-results" class="search-results"></ul></div></div>
+<script>const input=document.getElementById('site-search'),results=document.getElementById('search-results');const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');let data=[];
+fetch('search-index.json').then(r=>r.json()).then(x=>{data=x;run();});
+function run(){const q=input.value.trim().toLowerCase(),found=q?data.filter(p=>p.search.includes(q)):data;
+results.innerHTML=found.map(p=>`<li><a href="${esc(p.url)}">${esc(p.title)}</a><div class="post-excerpt">${esc(p.excerpt)}</div></li>`).join('');}
+input.addEventListener('input',run);</script>
 <footer class="site">Powered by Enhanced Markdown Reader · 数学 · 定理 · Crossref</footer>
 </body>
 </html>

@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Banach 不动点定理及其应用</title>
+<meta name="description" content="压缩映射原理是度量空间理论的基石，我们给出完整证明并用它建立 Picard 迭代收敛性。">
+<meta property="og:title" content="Banach 不动点定理及其应用">
+<meta property="og:description" content="压缩映射原理是度量空间理论的基石，我们给出完整证明并用它建立 Picard 迭代收敛性。">
+
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <style>
 :root { --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --accent:#4f46e5;
@@ -26,6 +30,19 @@ header.site .brand { font-weight:800; font-size:18px; color:var(--fg); letter-sp
 header.site nav { display:flex; gap:16px; font-size:14px; }
 header.site nav a { color:var(--muted); padding:4px 8px; border-radius:6px; }
 header.site nav a:hover { color:var(--accent); background:var(--card); }
+.search-box { max-width:760px; margin:28px auto 0; }
+.search-box input { width:100%; padding:11px 13px; border:1px solid var(--border);
+  background:var(--bg); color:var(--fg); border-radius:9px; font:inherit; }
+.search-results { list-style:none; padding:0; margin:10px 0; }
+.search-results li { padding:9px 0; border-bottom:1px dashed var(--border); }
+.post-nav,.related { border-top:1px solid var(--border); margin-top:34px; padding-top:20px; }
+.post-nav { display:flex; justify-content:space-between; gap:18px; }
+.post-nav a { max-width:48%; }
+.cover { width:100%; max-height:360px; object-fit:cover; border-radius:12px; margin:0 0 1.4em; }
+img.zoomable { cursor:zoom-in; }
+.image-lightbox { position:fixed; inset:0; z-index:30; display:grid; place-items:center;
+  padding:30px; background:rgba(0,0,0,.8); cursor:zoom-out; }
+.image-lightbox img { max-width:100%; max-height:100%; object-fit:contain; }
 
 /* 首页文章列表 */
 .post-list { list-style:none; margin:36px auto; padding:0; max-width:760px; }
@@ -110,7 +127,7 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
 <body>
 <header class="site"><div class="wrap">
   <a class="brand" href="index.html">📝 My Blog</a>
-  <nav><a href="index.html">首页</a><a href="tags.html">归档</a></nav>
+  <nav><a href="index.html">首页</a><a href="tags.html">归档</a><a href="search.html">搜索</a></nav>
 </div></header>
 <div class="wrap"><div id="layout">
   <aside id="sidebar">
@@ -118,15 +135,13 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
     <div style="color:var(--muted);font-size:12px;margin-bottom:12px">2026-08-20</div>
     <nav id="toc"></nav>
   </aside>
-  <div id="main"><article id="container"></article></div>
+  <div id="main"><article id="container"></article><nav class="post-nav"><a href="fourier-series.html">← 傅里叶级数与 Dirichlet 收敛</a><span></span></nav><section class="related"><b>相关文章</b><ul><li><a href="fourier-series.html">傅里叶级数与 Dirichlet 收敛</a></li></ul></section></div>
 </div></div>
 <footer class="site">Powered by Enhanced Markdown Reader · 2026-08-20</footer>
-<script>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
-</script>
 <script>
 // ============ 核心：数学感知的 Markdown 渲染管线 ============
 // 关键点：在 marked 解析前，先把数学区域提取为占位符，
@@ -197,7 +212,7 @@ function restoreMath(html) {
         displayMode: m.display,
         throwOnError: false,
         strict: false,
-        trust: true,
+        trust: false,
         macros: MACROS,
       }).replace("katex-display", m.display ? "katex-display eq-block" : "katex");
     } catch (e) {
@@ -280,14 +295,17 @@ function renderTheorems(html) {
         if (t.label) refTable[t.label] = { number: num, kind: t.kind, zh: meta.zh };
       }
     }
-    const bodyHtml = restoreMath(protectMath(processCrossrefs(t.body)));
+    const bodyHtml = restoreMath(marked.parse(protectMath(processCrossrefs(t.body))));
     const qed = t.isProof ? '<span class="qed">∎</span>' : "";
     return `<div class="thm-env ${t.kind}">${headName}<div class="thm-body">${bodyHtml}</div>${qed}</div>`;
   });
 }
 function starredSuffix(meta){ return ""; }
 function renderInlineText(s){ return esc(s); }
-function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
+}
 
 // ============ 交叉引用 ============
 // 处理 \ref{...}, \eqref{...}, \autoref{...} —— 在公式渲染前替换为占位，
@@ -327,15 +345,16 @@ function resolveCrossrefs(root) {
 }
 
 // marked 配置
+const markdownRenderer = new marked.Renderer();
+markdownRenderer.html = raw => esc(raw);
 marked.setOptions({
   gfm: true, breaks: false,
+  renderer: markdownRenderer,
   highlight: (code, lang) => {
     try { return lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value; }
     catch { return code; }
   },
 });
-
-
 
 // ============ Front Matter (YAML) ============
 // 解析文档开头的 --- ... --- 元数据块。支持标量、行内数组 [a, b]、
@@ -372,11 +391,11 @@ function stripQuotes(s) {
 }
 
 function renderFrontMatter(meta) {
-  const esc2 = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const esc2 = esc;
   let html = '<div class="fm-card">';
   if (meta.title) html += `<h1>${esc2(meta.title)}</h1>`;
   const items = [];
-  for (const k of ["author", "date", "affiliation", "email"]) {
+  for (const k of ["author", "date", "updated", "series", "affiliation", "email"]) {
     if (meta[k]) items.push(`<span><b>${esc2(k)}</b>: ${esc2(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k])}</span>`);
   }
   if (items.length) html += `<div class="fm-meta">${items.join("")}</div>`;
@@ -384,8 +403,32 @@ function renderFrontMatter(meta) {
     const tags = Array.isArray(meta.tags) ? meta.tags : String(meta.tags).split(/[,，]\s*/);
     if (tags.length) html += `<div style="margin-top:.5em"><span class="fm-tags">${tags.map(t=>`<span class="fm-tag">${esc2(t)}</span>`).join("")}</span></div>`;
   }
+  if (meta.cover) html += `<img class="cover zoomable" src="${esc2(meta.cover)}" alt="${esc2(meta.title || "封面")}">`;
   html += "</div>";
   return html;
+}
+
+// 轻量写作扩展：:::note / :::tip / :::warning 块会变为可移植的引用提示块。
+function preprocessMarkdown(src) {
+  const labels = { note: "注", tip: "提示", warning: "注意" };
+  return src.replace(/^:::(note|tip|warning)(?:\s+([^\n]+))?\n([\s\S]*?)^:::\s*$/gm,
+    (_, kind, title, body) => `> **${labels[kind]}${title ? "：" + title.trim() : ""}**\n>\n` +
+      body.trim().split("\n").map(line => `> ${line}`).join("\n"));
+}
+
+function enhanceImages(root) {
+  root.querySelectorAll("img").forEach(img => {
+    img.loading = "lazy";
+    img.classList.add("zoomable");
+    img.onclick = () => {
+      const overlay = document.createElement("div");
+      overlay.className = "image-lightbox";
+      const full = document.createElement("img");
+      full.src = img.currentSrc || img.src; full.alt = img.alt;
+      overlay.append(full); overlay.onclick = () => overlay.remove();
+      document.body.append(overlay);
+    };
+  });
 }
 
 // toc: true —— 从渲染后的 HTML 收集 h2/h3 生成目录（在标题上加锚点）
@@ -396,8 +439,7 @@ function buildToc(container, insertBeforeEl) {
   const lis = [];
   heads.forEach(h => {
     if (!h.id) h.id = "sec-" + (++i);
-    const dot = document.createElement("span");
-    lis.push(`<li style="margin-left:${h.tagName === "H3" ? "1.2em" : "0"}"><a href="#${h.id}">${h.textContent}</a></li>`);
+    lis.push(`<li style="margin-left:${h.tagName === "H3" ? "1.2em" : "0"}"><a href="#${esc(h.id)}">${esc(h.textContent)}</a></li>`);
   });
   insertBeforeEl.insertAdjacentHTML("beforebegin",
     `<div class="toc-box"><div class="toc-title">目录</div><ol>${lis.join("")}</ol></div>`);
@@ -411,7 +453,7 @@ function render(src) {
   if (meta && meta.title) document.title = meta.title + " · MD Reader";
   else document.title = "Enhanced Markdown Reader";
   // 管线顺序：定理提取 → 交叉引用占位 → 数学保护 → marked 解析
-  let s = extractTheorems(body);
+  let s = extractTheorems(preprocessMarkdown(body));
   s = processCrossrefs(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
@@ -426,6 +468,7 @@ function render(src) {
   }
   renderBareEnvironments();
   resolveCrossrefs(container);
+  enhanceImages(container);
 }
 
 // 对未包裹 $ 的 \begin{equation}/align/gather 等做兜底渲染
@@ -434,28 +477,42 @@ function renderBareEnvironments() {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const targets = [];
   while (walker.nextNode()) {
-    if (ENV_RE.test(walker.currentNode.textContent)) targets.push(walker.currentNode);
+    if (!walker.currentNode.parentElement.closest("pre, code") && ENV_RE.test(walker.currentNode.textContent)) targets.push(walker.currentNode);
     ENV_RE.lastIndex = 0;
   }
   targets.forEach(node => {
-    const span = document.createElement("span");
-    try {
-      span.innerHTML = katex.renderToString(node.textContent, { displayMode: true, throwOnError: false, strict: false, macros: MACROS });
-      node.parentNode.replaceChild(span, node);
-    } catch {}
+    const fragment = document.createDocumentFragment();
+    const text = node.textContent;
+    const re = new RegExp(ENV_RE.source, "g");
+    let last = 0, match;
+    while ((match = re.exec(text))) {
+      fragment.append(document.createTextNode(text.slice(last, match.index)));
+      const span = document.createElement("span");
+      try {
+        span.innerHTML = katex.renderToString(match[0].replace(/^\u0000|\u0000$/g, ""),
+          { displayMode: true, throwOnError: false, strict: false, trust: false, macros: MACROS });
+        fragment.append(span);
+      } catch {
+        fragment.append(document.createTextNode(match[0]));
+      }
+      last = re.lastIndex;
+    }
+    fragment.append(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(fragment, node);
   });
 }
 
 // ==================== 博客文章渲染 ====================
 const container = document.getElementById("container");
-const SRC = "---\ntitle: Banach 不动点定理及其应用\ndate: 2026-08-20\ntags: [分析, 不动点]\nexcerpt: 压缩映射原理是度量空间理论的基石，我们给出完整证明并用它建立 Picard 迭代收敛性。\n---\n\n# Banach 不动点定理\n\n## 定理与证明\n\n\\begin{definition}{def:contraction}[压缩映射]\n设 $(X,d)$ 为度量空间（参见系列第一篇的 \\autoref{def:metric} 风格定义）。若存在 $0 \\le q < 1$ 使 $d(Tx,Ty) \\le q\\,d(x,y)$ 对一切 $x,y\\in X$ 成立，则称 $T$ 为压缩映射。\n\\end{definition}\n\n\\begin{theorem}{thm:banach}[Banach 不动点定理]\n完备度量空间上的压缩映射有唯一不动点。\n$$ x_{n+1} = T x_n, \\qquad d(x_n, x^\\*) \\le \\frac{q^n}{1-q} d(x_1, x_0). \\label{eq:rate} $$\n\\end{theorem}\n\n\\begin{proof}\n迭代序列 $\\{x_n\\}$ 是 Cauchy 列：由几何级数估计 \\eqref{eq:rate} 立得。\n完备性保证极限 $x^\\*$ 存在，且 $Tx^\\* = x^\\*$。唯一性由压缩性直接得出。\n\\end{proof}\n\n## 应用：Picard 定理\n\n\\begin{corollary}{cor:picard}\n设 $f$ 关于 $y$ 满足 Lipschitz 条件，则初值问题 $y' = f(x,y)$，$y(x_0)=y_0$ 在局部存在唯一解。\n\\end{corollary}\n\n\\begin{remark}\n结合傅里叶分析中的收敛定理，可以看到逐次逼近思想的普适性。\n\\end{remark}\n";
+const SRC = "---\ntitle: Banach 不动点定理及其应用\ndate: 2026-08-20\ntags: [分析, 不动点]\nexcerpt: 压缩映射原理是度量空间理论的基石，我们给出完整证明并用它建立 Picard 迭代收敛性。\n---\n\n# Banach 不动点定理\n\n## 定理与证明\n\n\\begin{definition}{def:contraction}[压缩映射]\n设 $(X,d)$ 为度量空间（参见系列第一篇的 \\autoref{def:metric} 风格定义）。若存在 $0 \\le q \u003c 1$ 使 $d(Tx,Ty) \\le q\\,d(x,y)$ 对一切 $x,y\\in X$ 成立，则称 $T$ 为压缩映射。\n\\end{definition}\n\n\\begin{theorem}{thm:banach}[Banach 不动点定理]\n完备度量空间上的压缩映射有唯一不动点。\n$$ x_{n+1} = T x_n, \\qquad d(x_n, x^\\*) \\le \\frac{q^n}{1-q} d(x_1, x_0). \\label{eq:rate} $$\n\\end{theorem}\n\n\\begin{proof}\n迭代序列 $\\{x_n\\}$ 是 Cauchy 列：由几何级数估计 \\eqref{eq:rate} 立得。\n完备性保证极限 $x^\\*$ 存在，且 $Tx^\\* = x^\\*$。唯一性由压缩性直接得出。\n\\end{proof}\n\n## 应用：Picard 定理\n\n\\begin{corollary}{cor:picard}\n设 $f$ 关于 $y$ 满足 Lipschitz 条件，则初值问题 $y' = f(x,y)$，$y(x_0)=y_0$ 在局部存在唯一解。\n\\end{corollary}\n\n\\begin{remark}\n结合傅里叶分析中的收敛定理，可以看到逐次逼近思想的普适性。\n\\end{remark}\n";
+const COVER_HTML = "";
 
 (function renderPost(src) {
   thmStore = []; crefStore = [];
   for (const k in counters) delete counters[k];
   const { meta, body } = parseFrontMatter(src);
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(body);
+  let s = extractTheorems(preprocessMarkdown(body));
   s = processCrossrefs(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
@@ -463,8 +520,10 @@ const SRC = "---\ntitle: Banach 不动点定理及其应用\ndate: 2026-08-20\nt
   html = renderTheorems(html);
   if (meta) html = renderFrontMatter(meta) + html;
   container.innerHTML = html;
+  if (COVER_HTML) container.insertAdjacentHTML("afterbegin", COVER_HTML);
   renderBareEnvironments();
   resolveCrossrefs(container);
+  enhanceImages(container);
   // 左侧目录（toc:false 关闭）
   const show = !meta || !/^(false|no)$/i.test(String(meta.toc));
   const nav = document.getElementById("toc");
@@ -472,7 +531,7 @@ const SRC = "---\ntitle: Banach 不动点定理及其应用\ndate: 2026-08-20\nt
   let i = 0; const lis = [];
   container.querySelectorAll("h2, h3").forEach(h => {
     if (!h.id) h.id = "sec-" + (++i);
-    lis.push(`<a class="${h.tagName === "H3" ? "lv3" : ""}" href="#${h.id}">${h.textContent}</a>`);
+    lis.push(`<a class="${h.tagName === "H3" ? "lv3" : ""}" href="#${esc(h.id)}">${esc(h.textContent)}</a>`);
   });
   nav.innerHTML = lis.join("") || '<span style="color:var(--muted)">（无章节）</span>';
 })(SRC);

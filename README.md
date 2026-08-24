@@ -33,6 +33,7 @@ python3 -m http.server 8000 --directory .
 | 📂 打开文件 | 加载本地 `.md` / `.markdown` / `.txt` 文件 |
 | ✏️ 编辑源码 | 在源码编辑与渲染预览之间切换，编辑时实时渲染 |
 | 🖨️ 导出 PDF | 调用浏览器打印功能 |
+| ↔ 宽度 / A 字号 | 切换阅读宽度与字号（记住本机设置） |
 
 也可以把 `.md` 文件直接拖进窗口。
 
@@ -106,6 +107,37 @@ draft: true                # 草稿：不发布
 写作流程：往 `content/` 丢 `.md` → `python3 blog.py` → 完成。部署只需把 `site/` 上传到任意静态托管（GitHub Pages、Netlify、Vercel 等）。
 
 示例文章见 `content/fourier-series.md` 与 `banach-fixed-point.md`（覆盖定理环境 + crossref + 数学环境 + Front Matter 的完整用法）。
+
+### 发布与写作增强
+
+构建器还会生成 `search.html`、`search-index.json`、`rss.xml` 和 `sitemap.xml`。首页与搜索页均可按标题、标签和摘要检索；文章页包含相邻文章与同标签相关文章。
+
+- 在 `content/assets/` 放本地资源；文章用 `![](assets/figure.png)` 引用，构建时自动复制到 `site/assets/`。
+- 文内相对文章链接会由 `[下一篇](next.md)` 自动改为 `next.html`。
+- 支持 `cover`、`description`、`updated`、`series`、`slug` 等 Front Matter 字段；其中 `cover` 同时生成文章头图和 Open Graph 图片元数据。
+- `:::note`、`:::tip`、`:::warning` 块会被渲染为提示引用块；文章图片支持点击放大。
+- 阅读器提供阅读进度、宽版排版和大字号开关；Front Matter 的 `updated`、`series`、`cover` 会显示在元数据卡片中。
+
+```yaml
+---
+title: 文章标题
+date: 2026-08-23
+updated: 2026-08-25
+tags: [分析, 教学]
+description: 用于搜索结果和社交分享的摘要
+cover: assets/cover.png
+series: 泛函分析入门
+slug: custom-url
+---
+```
+
+仓库包含 [GitHub Pages 工作流](.github/workflows/pages.yml)：将默认分支设为 `main`、在仓库设置中启用 GitHub Pages 后，推送会先运行测试、构建 `site/`，再部署页面。
+
+### 测试
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ## 📐 数学环境
 
