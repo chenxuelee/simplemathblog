@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enhanced Markdown Reader</title>
+<!-- Markdown 解析 -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<!-- KaTeX 数学渲染（支持绝大多数 LaTeX 环境） -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<!-- 代码高亮 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280;
+  --accent: #4f46e5; --border: #e5e7eb; --card: #f9fafb;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #111318; --fg: #e5e7eb; --muted: #9ca3af; --accent: #818cf8; --border: #2d3139; --card: #1a1d24; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif; }
+#toolbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 10px; align-items: center;
+  padding: 10px 18px; background: var(--card); border-bottom: 1px solid var(--border); }
+#toolbar button { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
+#toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+#file-input { display: none; }
+#status { color: var(--muted); font-size: 13px; }
+#container { max-width: 880px; margin: 0 auto; padding: 32px 28px 120px; line-height: 1.75; font-size: 16px; }
+#editor { width: 100%; min-height: 70vh; display: none; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 10px; padding: 20px; font: 14px/1.6 ui-monospace, Menlo, monospace; resize: vertical; }
+
+/* ---- Markdown 元素样式 ---- */
+h1,h2,h3,h4 { line-height: 1.35; margin-top: 1.6em; }
+h1 { font-size: 2em; border-bottom: 2px solid var(--border); padding-bottom: .3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
+a { color: var(--accent); }
+blockquote { border-left: 4px solid var(--accent); margin: 1em 0; padding: .4em 1em; background: var(--card); border-radius: 0 8px 8px 0; }
+code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: .15em .4em; font-size: .88em; }
+pre code { display: block; padding: 14px; overflow-x: auto; border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; margin: 1.2em 0; }
+th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+th { background: var(--card); }
+tr:nth-child(even) td { background: var(--card); }
+img { max-width: 100%; }
+hr { border: none; border-top: 1px solid var(--border); }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 2px; }
+.math-error { color: #ef4444; background: rgba(239,68,68,.08); border-radius: 6px; padding: 2px 6px; font-family: monospace; font-size: .85em; }
+
+/* ---- 定理环境样式 ---- */
+.thm-env { margin: 1.2em 0; padding: .8em 1.1em; border-radius: 8px;
+  background: var(--card); border-left: 4px solid var(--accent); }
+.thm-env.proof { background: transparent; border-left-color: var(--border); }
+.thm-head { font-weight: 700; font-style: italic; color: var(--fg); }
+.thm-env.proof .thm-head { font-style: normal; }
+.thm-title { font-weight: 400; }
+.thm-body { margin-top: .35em; }
+.qed { float: right; }
+a.ref-link { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); }
+
+/* ---- Front Matter 元数据卡片 ---- */
+.fm-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: .9em 1.2em; margin-bottom: 1.8em; font-size: .92em; }
+.fm-card h1 { margin: 0 0 .3em; font-size: 1.7em; border-bottom: none; padding-bottom: 0; }
+.fm-meta { display: flex; flex-wrap: wrap; gap: .35em 1.4em; color: var(--muted); }
+.fm-tags { display: inline-flex; gap: .45em; flex-wrap: wrap; }
+.fm-tag { background: var(--accent); color: #fff; opacity: .85; border-radius: 999px;
+  padding: .05em .7em; font-size: .82em; }
+/* ---- 目录 ---- */
+.toc-box { background: transparent; border: 1px dashed var(--border); border-radius: 10px;
+  padding: .8em 1.2em; margin-bottom: 1.8em; font-size: .92em; }
+.toc-box .toc-title { font-weight: 700; margin-bottom: .4em; }
+.toc-box ol { margin: 0; padding-left: 1.4em; }
+.toc-box a { text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-open">📂 打开文件</button>
+  <button id="btn-edit">✏️ 编辑源码</button>
+  <button id="btn-print">🖨️ 导出 PDF</button>
+  <input type="file" id="file-input" accept=".md,.markdown,.txt,.tex">
+  <span id="status">内置演示文档 · 支持拖拽 .md 文件进窗口</span>
+</div>
+
+<div id="container" class="markdown-body"></div>
+<textarea id="editor" spellcheck="false"></textarea>
+
+<script>
+// ============ 核心：数学感知的 Markdown 渲染管线 ============
+// 关键点：在 marked 解析前，先把数学区域提取为占位符，
+// 避免 $...$ 内部的 *、_、\\ 等被 Markdown 引擎破坏。
+
+const PLACEHOLDER_PREFIX = "\u0000MATH";
+let mathStore = [];
+
+function protectMath(src) {
+  mathStore = [];
+  const stash = (tex, display) => {
+    const token = PLACEHOLDER_PREFIX + (mathStore.length) + "\u0000";
+    mathStore.push({ tex, display });
+    return token;
+  };
+  let out = "";
+  let i = 0, n = src.length;
+  while (i < n) {
+    // 跳过代码块/行内代码，其中的 $ 不算数学定界符
+    const fence = src.slice(i).match(/^(```+|~~~+)/);
+    if (fence) {
+      const fenceStr = fence[1];
+      const end = src.indexOf("\n" + fenceStr.trim()[0].repeat(fenceStr.length), i + fenceStr.length);
+      const stop = end === -1 ? n : end + fenceStr.length + 1;
+      out += src.slice(i, stop); i = stop; continue;
+    }
+    if (src.startsWith("$$", i)) {
+      // $$ ... $$ 或 $$ ... $ （多行）
+      let j = src.indexOf("$$", i + 2);
+      // 处理 "$$\n...\n$$" 与 "$$...$$"
+      if (j !== -1 && j > i + 2) { out += stash(src.slice(i + 2, j).trim(), true); i = j + 2; continue; }
+    }
+    if (src[i] === "\\" && src[i + 1] === "[") {          // \[ ... \] display
+      const j = src.indexOf("\\]", i + 2);
+      if (j !== -1) { out += stash(src.slice(i + 2, j).trim(), true); i = j + 2; continue; }
+    }
+    if (src[i] === "\\" && src[i + 1] === "(") {          // \( ... \) inline
+      const j = src.indexOf("\\)", i + 2);
+      if (j !== -1) { out += stash(src.slice(i + 2, j).trim(), false); i = j + 2; continue; }
+    }
+    if (src[i] === "$" && src[i + 1] !== "$") {           // $ ... $ inline
+      const j = findInlineDollarEnd(src, i + 1);
+      if (j !== -1) { out += stash(src.slice(i + 1, j).trim(), false); i = j + 1; continue; }
+    }
+    out += src[i++];
+  }
+  return out;
+}
+
+// 行内 $ 结束位置：不允许紧贴空白开头，内部不能有换行后紧跟空行的规则从简
+function findInlineDollarEnd(s, start) {
+  for (let k = start; k < s.length; k++) {
+    if (s[k] === "\\") { k++; continue; }        // 转义 \$ 等
+    if (s[k] === "\n") return -1;                 // 行内公式不跨行
+    if (s[k] === "$") {
+      if (s[start] === undefined || /[\s]/.test(s[start])) return -1;
+      return k;
+    }
+  }
+  return -1;
+}
+
+function restoreMath(html) {
+  return html.replace(new RegExp(PLACEHOLDER_PREFIX + "(\\d+)\u0000", "g"), (_, idx) => {
+    const m = mathStore[+idx];
+    try {
+      return katex.renderToString(m.tex, {
+        displayMode: m.display,
+        throwOnError: false,
+        strict: false,
+        trust: true,
+        macros: MACROS,
+      }).replace("katex-display", m.display ? "katex-display eq-block" : "katex");
+    } catch (e) {
+      return `<span class="math-error">${m.tex.replace(/</g,"&lt;")} — ${e.message}</span>`;
+    }
+  });
+}
+
+// 用户可扩展的宏表
+const MACROS = {
+  "\\RR": "\\mathbb{R}", "\\NN": "\\mathbb{N}", "\\ZZ": "\\mathbb{Z}",
+  "\\QQ": "\\mathbb{Q}", "\\CC": "\\mathbb{C}", "\\EE": "\\mathbb{E}",
+  "\\dd": "\\mathrm{d}", "\\norm": "\\left\\|#1\\right\\|",
+  "\\abs": "\\left|#1\\right|",
+};
+
+// ============ 定理环境（AMSL 风格）============
+// 支持 \begin{theorem}[标题]{label=xxx} ... \end{theorem} 及
+// \begin{theorem}{thm:pythagoras} 两种 label 写法
+const THM_KINDS = {
+  theorem:     { zh: "定理",   en: "Theorem",     counter: "thm" },
+  lemma:       { zh: "引理",   en: "Lemma",       counter: "thm" },
+  proposition: { zh: "命题",   en: "Proposition", counter: "thm" },
+  corollary:   { zh: "推论",   en: "Corollary",   counter: "thm" },
+  conjecture:  { zh: "猜想",   en: "Conjecture",  counter: "thm" },
+  definition:  { zh: "定义",   en: "Definition",  counter: "def" },
+  example:     { zh: "例",     en: "Example",     counter: "ex" },
+  remark:      { zh: "注",     en: "Remark",      counter: "rmk", bodyItalic: true },
+  proof:       { zh: "证明",   en: "Proof" },
+};
+const THM_ENV_RE = /[ \t]*(?:(?:^|\n)```[\s\S]*?```(?:\n|$))|\\begin\{(theorem|lemma|proposition|corollary|conjecture|definition|example|remark|proof)\*?\}((?:\[[^\]]*\]|\{[^}]*\}){0,2})([\s\S]*?)\\end\{\1\*?\}/g;
+
+// 引用表：label -> { number, kind, text }
+let refTable = {};
+let eqCounter = 0;
+
+function parseThmArgs(argStr) {
+  let title = "", label = null;
+  const re = /\[([^\]]*)\]|\{([^}]*)\}/g; let m;
+  while ((m = re.exec(argStr))) {
+    if (m[1] !== undefined) title = m[1].trim();
+    else {
+      const inner = m[2].trim();
+      const lm = inner.match(/^label\s*=\s*(.+)$/i);
+      label = lm ? lm[1].trim() : (inner || null);
+    }
+  }
+  return { title, label };
+}
+
+function extractTheorems(src) {
+  refTable = {}; eqCounter = 0;
+  return src.replace(THM_ENV_RE, (match, kind, argStr, body) => {
+    if (!kind) return match; // 是代码块，原样保留
+    const starred = match.includes("\\begin{" + kind + "*}");
+    const isProof = kind === "proof";
+    const { title, label } = parseThmArgs(argStr || "");
+    const token = "\u0000THM" + thmStore.length + "\u0000";
+    thmStore.push({ kind, title, label, body: body.trim(), starred, isProof });
+    return "\n\n" + token + "\n\n";
+  });
+}
+
+let thmStore = [];
+const counters = {};
+
+function renderTheorems(html) {
+  return html.replace(/\u0000THM(\d+)\u0000/g, (_, idx) => {
+    const t = thmStore[+idx];
+    const meta = THM_KINDS[t.kind];
+    let headName;
+    if (t.isProof) {
+      headName = `<span class="thm-head">${meta.zh}.</span>`;
+    } else {
+      if (t.starred) { headName = `<span class="thm-head">${meta.zh}${starredSuffix(meta)}.</span>`; }
+      else {
+        counters[meta.counter] = (counters[meta.counter] || 0) + 1;
+        const num = counters[meta.counter];
+        headName = `<span class="thm-head"${t.label ? ` id="lbl-${esc(t.label)}"` : ""}>${meta.zh} ${num}${t.title ? ` <span class="thm-title">(${renderInlineText(t.title)})</span>` : ""}.</span>`;
+        if (t.label) refTable[t.label] = { number: num, kind: t.kind, zh: meta.zh };
+      }
+    }
+    const bodyHtml = restoreMath(protectMath(processCrossrefs(t.body)));
+    const qed = t.isProof ? '<span class="qed">∎</span>' : "";
+    return `<div class="thm-env ${t.kind}">${headName}<div class="thm-body">${bodyHtml}</div>${qed}</div>`;
+  });
+}
+function starredSuffix(meta){ return ""; }
+function renderInlineText(s){ return esc(s); }
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+
+// ============ 交叉引用 ============
+// 处理 \ref{...}, \eqref{...}, \autoref{...} —— 在公式渲染前替换为占位，
+// 公式渲染后回填为链接。同时处理公式内的 \label -> 自动 \tag。
+function processCrossrefs(src) {
+  // 1) 公式内 \label{x}：登记编号并转为 \tag{n}
+  src = src.replace(/\\label\{([^}]+)\}/g, (m, label) => {
+    if (refTable[label]) return m; // 已被定理环境占用
+    eqCounter += 1;
+    refTable[label] = { number: eqCounter, kind: "equation", zh: "式" };
+    return `\\tag{${eqCounter}}`;
+  });
+  // 2) 正文中的引用 -> 占位符（防止 Markdown 破坏）
+  return src.replace(/(\\eqref|\\autoref|\\ref)\{([^}]+)\}/g, (m, cmd, label) => {
+    const idx = crefStore.length;
+    crefStore.push({ cmd, label });
+    return `XREFZ${idx}ENDX`;
+  });
+}
+let crefStore = [];
+
+function resolveCrossrefs(root) {
+  // 直接在整个容器的 innerHTML 上做替换，占位符 \u0000 不会出现在正常 HTML 中，
+  // 且此时公式已渲染完毕，不会被破坏。
+  let html = root.innerHTML;
+  if (!html.includes("XREFZ")) return;
+  html = html.replace(/XREFZ(\d+)ENDX/g, (_, i) => {
+    const { cmd, label } = crefStore[+i];
+    const entry = refTable[label];
+    if (!entry) return `<span class="math-error">?? (${esc(label)})</span>`;
+    let text = `${entry.number}`;
+    if (cmd === "\\eqref") text = `(${text})`;
+    else if (cmd === "\\autoref") text = `${entry.zh} ${entry.number}`;
+    return `<a class="ref-link" href="#lbl-${esc(label)}">${text}</a>`;
+  });
+  root.innerHTML = html;
+}
+
+// marked 配置
+marked.setOptions({
+  gfm: true, breaks: false,
+  highlight: (code, lang) => {
+    try { return lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value; }
+    catch { return code; }
+  },
+});
+
+const container = document.getElementById("container");
+const editor = document.getElementById("editor");
+const statusEl = document.getElementById("status");
+
+// ============ Front Matter (YAML) ============
+// 解析文档开头的 --- ... --- 元数据块。支持标量、行内数组 [a, b]、
+// 短横线列表、嵌套一层对象；toc: true 时自动生成目录。
+function parseFrontMatter(src) {
+  const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { meta: null, body: src };
+  const meta = {};
+  let currentKey = null;
+  for (const line of m[1].split(/\r?\n/)) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    // 列表项 "- item"
+    const li = line.match(/^\s+-\s+(.+)$/);
+    if (li && currentKey) {
+      if (!Array.isArray(meta[currentKey])) meta[currentKey] = [];
+      meta[currentKey].push(stripQuotes(li[1].trim()));
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (!kv) continue;
+    const key = kv[1]; let val = kv[2].trim();
+    currentKey = key;
+    if (val === "") { meta[key] = ""; continue; }
+    // 行内数组 [a, b, c]
+    const arr = val.match(/^\[(.*)\]$/);
+    if (arr) { meta[key] = arr[1] ? arr[1].split(",").map(s => stripQuotes(s.trim())) : []; continue; }
+    meta[key] = stripQuotes(val);
+  }
+  return { meta, body: src.slice(m[0].length) };
+}
+function stripQuotes(s) {
+  return ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
+    ? s.slice(1, -1) : s;
+}
+
+function renderFrontMatter(meta) {
+  const esc2 = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  let html = '<div class="fm-card">';
+  if (meta.title) html += `<h1>${esc2(meta.title)}</h1>`;
+  const items = [];
+  for (const k of ["author", "date", "affiliation", "email"]) {
+    if (meta[k]) items.push(`<span><b>${esc2(k)}</b>: ${esc2(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k])}</span>`);
+  }
+  if (items.length) html += `<div class="fm-meta">${items.join("")}</div>`;
+  if (meta.tags) {
+    const tags = Array.isArray(meta.tags) ? meta.tags : String(meta.tags).split(/[,，]\s*/);
+    if (tags.length) html += `<div style="margin-top:.5em"><span class="fm-tags">${tags.map(t=>`<span class="fm-tag">${esc2(t)}</span>`).join("")}</span></div>`;
+  }
+  html += "</div>";
+  return html;
+}
+
+// toc: true —— 从渲染后的 HTML 收集 h2/h3 生成目录（在标题上加锚点）
+function buildToc(container, insertBeforeEl) {
+  const heads = container.querySelectorAll("h2, h3");
+  if (!heads.length) return;
+  let i = 0;
+  const lis = [];
+  heads.forEach(h => {
+    if (!h.id) h.id = "sec-" + (++i);
+    const dot = document.createElement("span");
+    lis.push(`<li style="margin-left:${h.tagName === "H3" ? "1.2em" : "0"}"><a href="#${h.id}">${h.textContent}</a></li>`);
+  });
+  insertBeforeEl.insertAdjacentHTML("beforebegin",
+    `<div class="toc-box"><div class="toc-title">目录</div><ol>${lis.join("")}</ol></div>`);
+}
+
+function render(src) {
+  thmStore = []; crefStore = [];
+  for (const k in counters) delete counters[k];
+  // 0) Front Matter：剥离元数据，正文进入管线
+  const { meta, body } = parseFrontMatter(src);
+  if (meta && meta.title) document.title = meta.title + " · MD Reader";
+  else document.title = "Enhanced Markdown Reader";
+  // 管线顺序：定理提取 → 交叉引用占位 → 数学保护 → marked 解析
+  let s = extractTheorems(body);
+  s = processCrossrefs(s);
+  const stashed = protectMath(s);
+  let html = marked.parse(stashed);
+  html = restoreMath(html);
+  html = renderTheorems(html);   // 定理块内部再做数学渲染
+  if (meta) html = renderFrontMatter(meta) + html;
+  container.innerHTML = html;
+  // toc: true —— 目录插在元数据卡片之后（无卡片则在最前）
+  if (meta && /^(true|yes)$/i.test(String(meta.toc))) {
+    const anchor = container.querySelector(".fm-card") || container.firstElementChild;
+    if (anchor) buildToc(container, anchor); else { const d = document.createElement("div"); container.prepend(d); buildToc(container, d); }
+  }
+  renderBareEnvironments();
+  resolveCrossrefs(container);
+}
+
+// 对未包裹 $ 的 \begin{equation}/align/gather 等做兜底渲染
+const ENV_RE = /\u0000?\\begin\{(equation\*?|align\*?|alignat\*?|gather\*?|multline\*?|eqnarray\*?|split|flalign\*?)\}[\s\S]*?\\end\{\1\}\u0000?/g;
+function renderBareEnvironments() {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  while (walker.nextNode()) {
+    if (ENV_RE.test(walker.currentNode.textContent)) targets.push(walker.currentNode);
+    ENV_RE.lastIndex = 0;
+  }
+  targets.forEach(node => {
+    const span = document.createElement("span");
+    try {
+      span.innerHTML = katex.renderToString(node.textContent, { displayMode: true, throwOnError: false, strict: false, macros: MACROS });
+      node.parentNode.replaceChild(span, node);
+    } catch {}
+  });
+}
+
+// ============ UI ============
+const DEMO = `---
+title: 增强数学 Markdown 阅读器
+author: YanTao Wang
+date: 2026-08-23
+tags: [数学, LaTeX, Markdown, KaTeX]
+toc: true
+---
+
+# 增强 Markdown 阅读器 · 数学环境演示
+
+行内公式：质能方程 $E = mc^2$，欧拉恒等式 $e^{i\\pi} + 1 = 0$。
+
+## 显示公式（多种定界符）
+
+$$ f(x) = \\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi} $$
+
+也可以用 LaTeX 原生定界符：
+
+\\[
+\\nabla \\times \\mathbf{B} = \\mu_0 \\mathbf{J} + \\mu_0 \\varepsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}
+\\]
+
+## 矩阵环境全家桶
+
+普通矩阵与各括号变体：
+
+$$
+A = \\begin{pmatrix} a_{11} & a_{12} & a_{13} \\\\ a_{21} & a_{22} & a_{23} \\\\ a_{31} & a_{32} & a_{33} \\end{pmatrix}, \\quad
+B = \\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}, \\quad
+|C| = \\begin{vmatrix} x & y \\\\ z & w \\end{vmatrix}
+$$
+
+自定义对齐的 array（含竖线分隔）：
+
+$$
+\\begin{array}{c|cc} 
+ & \\text{奇} & \\text{偶} \\\\ \\hline
++ & \\text{偶} & \\text{奇} \\\\
+\\times & \\text{奇} & \\text{偶}
+\\end{array}
+$$
+
+## 多行对齐环境
+
+\\begin{align*}
+(x+y)^2 &= x^2 + 2xy + y^2 \\\\
+(x-y)^2 &= x^2 - 2xy + y^2 \\\\
+(x+y)(x-y) &= x^2 - y^2
+\\end{align*}
+
+带编号的多行推导：
+
+$$
+\\begin{aligned}
+\\frac{\\partial L}{\\partial W} &= \\frac{\\partial L}{\\partial z} \\cdot \\frac{\\partial z}{\\partial W} \\\\
+&= \\delta \\cdot a^{T}
+\\end{aligned}
+$$
+
+## 分段函数 cases
+
+$$
+f(n) = \\begin{cases}
+n/2, & \\text{若 } n \\text{ 为偶数} \\\\
+3n+1, & \\text{若 } n \\text{ 为奇数}
+\\end{cases}
+$$
+
+## gather 多式联立
+
+\\begin{gather}
+a^2 + b^2 = c^2 \\\\
+\\sin^2\\theta + \\cos^2\\theta = 1
+\\end{gather}
+
+## 其他常用结构
+
+小矩阵嵌入行内：$\\sum_{\\begin{subarray}{l} i \\in \\Lambda \\\\ 0<j<n \\end{subarray}} x_{ij}$
+
+长公式编号与标签：$$\\begin{equation} e^{i\\theta} = \\cos\\theta + i\\sin\\theta \\end{equation}$$
+
+自定义宏：$\\RR^n$ 上的范数 $\\norm{x}$，微分 $\\dd x$。
+
+## 定理环境（AMSL 风格）
+
+\\begin{definition}{def:metric}[度量空间]
+设 $X$ 是集合。若映射 $d \\colon X \\times X \\to \\RR$ 满足非负性、对称性与三角不等式，则称 $(X, d)$ 为**度量空间**。
+\\end{definition}
+
+\\begin{theorem}{thm:pythagoras}[勾股定理]
+在直角三角形中，两直角边的平方和等于斜边的平方：若角 $C = 90^\\circ$，则
+$$ a^2 + b^2 = c^2. \\label{eq:pyth} $$
+\\end{theorem}
+
+\\begin{lemma}{lem:pos}[正性]
+对任意实数 $a, b$，有 $a^2 + b^2 \\geq 0$。
+\\end{lemma}
+
+\\begin{proof}
+由 引理 1 立得：平方恒非负，故和亦非负。
+\\end{proof}
+
+\\begin{corollary}{cor:main}
+结合 式 (1) 与上述正性，可得 $c^2 > 0$（当 $(a,b) \\neq (0,0)$）。
+\\end{corollary}
+
+\\begin{remark}
+本例展示了定理环境与交叉引用的配合：见 定义 1、定理 1、引理 1 与推论 1。
+\\end{remark}
+
+## 交叉引用
+
+- 用 \`\\ref\`：由式 \\ref{eq:pyth} 可知……
+- 用 \`\\eqref\`：带括号引用 —— 见 \\eqref{eq:pyth}。
+- 用 \`\\autoref\`：自动带前缀 —— \\autoref{thm:pythagoras}、\\autoref{def:metric}。
+- 引用不存在的标签：\`\\ref{no:such-label}\` 会显示为红色警告。
+
+> 提示：点击「编辑源码」修改内容实时预览；「打开文件」或直接把 \`.md\` 拖进来即可阅读自己的文档；「导出 PDF」调用打印。
+`;
+
+document.getElementById("btn-open").onclick = () => document.getElementById("file-input").click();
+document.getElementById("file-input").onchange = e => loadFile(e.target.files[0]);
+document.getElementById("btn-edit").onclick = function () {
+  const editing = editor.style.display === "block";
+  if (editing) { editor.style.display = "none"; container.style.display = "block"; this.textContent = "✏️ 编辑源码"; render(editor.value); }
+  else { editor.style.display = "block"; container.style.display = "none"; this.textContent = "👁️ 预览"; editor.value = editor.value || currentSrc; }
+};
+document.getElementById("btn-print").onclick = () => window.print();
+editor.addEventListener("input", () => { currentSrc = editor.value; render(currentSrc); });
+
+let currentSrc = DEMO;
+function loadFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    currentSrc = reader.result; editor.value = currentSrc;
+    render(currentSrc);
+    statusEl.textContent = "已加载：" + file.name;
+  };
+  reader.readAsText(file);
+}
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
+
+render(currentSrc);
+</script>
+</body>
+</html>

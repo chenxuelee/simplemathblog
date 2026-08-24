@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""
+blog.py —— 基于增强 Markdown 的静态博客系统。
+
+用法:
+    python3 blog.py                 # 构建 site/
+    python3 blog.py --posts dir     # 指定文章目录（默认 content/）
+    python3 blog.py --out dir       # 指定输出目录（默认 site/）
+
+特性:
+    - 全部增强语法支持：数学环境 / AMSL 定理环境 / crossref / Front Matter
+      （复用 md2html.extract_pipeline_js 提取的阅读器渲染管线，浏览器端渲染）
+    - 首页：按日期倒序的文章列表 + 标签云
+    - 文章页：元数据卡片 + 左侧目录侧栏（toc: false 可关闭）
+    - tags.html：标签归档页
+    - 纯静态输出，任意静态托管可直接部署
+"""
+
+import argparse
+import html as html_mod
+import json
+import re
+import shutil
+import sys
+from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from md2html import extract_pipeline_js
+
+HERE = Path(__file__).parent.resolve()
+
+# ---------------------------------------------------------------- front matter 解析（与阅读器一致的 Python 侧）
+
+def parse_fm(text):
+    m = re.match(r"^---\r?\n([\s\S]*?)\r?\n---\r?\n?", text)
+    if not m:
+        return {}, text
+    meta, key = {}, None
+    for line in m.group(1).splitlines():
+        t = line.strip()
+        if not t or t.startswith("#"):
+            continue
+        li = re.match(r"^-\s+(.+)$", t)
+        if li and key:
+            meta.setdefault(key, [])
+            if not isinstance(meta[key], list):
+                meta[key] = [meta[key]]
+            meta[key].append(li.group(1).strip().strip("\"'"))
+            continue
+        kv = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", t)
+        if not kv:
+            continue
+        key, val = kv.group(1), kv.group(2).strip()
+        arr = re.match(r"^\[(.*)\]$", val)
+        if arr:
+            meta[key] = [s.strip().strip("\"'") for s in arr.group(1).split(",") if s.strip()]
+        elif val == "":
+            meta[key] = ""
+        else:
+            meta[key] = val.strip("\"'")
+    return meta, text[m.end():]
+
+
+def load_posts(posts_dir: Path):
+    posts = []
+    for f in sorted(posts_dir.glob("*.md")) + sorted(posts_dir.glob("*.markdown")):
+        raw = f.read_text(encoding="utf-8")
+        meta, body = parse_fm(raw)
+        if meta.get("draft", "").lower() in ("true", "yes"):
+            continue
+        slug = f.stem
+        title = str(meta.get("title") or slug)
+        d = str(meta.get("date") or date.today().isoformat())
+        tags = meta.get("tags") or []
+        if isinstance(tags, str):
+            tags = [t.strip() for t in re.split(r"[,，]", tags) if t.strip()]
+        # 摘要：excerpt 字段优先，否则取正文前 120 字符（剥掉语法标记）
+        excerpt = meta.get("excerpt")
+        if not excerpt:
+            plain = re.sub(r"[$\\{}]|\\begin\{[^}]*\}|\\end\{[^}]*\}|[#*`>\[\]()-]", "", body)
+            excerpt = re.sub(r"\s+", " ", plain).strip()[:120] + ("…" if len(plain) > 120 else "")
+        posts.append({"slug": slug, "title": title, "date": d, "tags": tags,
+                      "meta": meta, "body": raw, "excerpt": excerpt})
+    posts.sort(key=lambda p: p["date"], reverse=True)
+    return posts
+
+
+# ---------------------------------------------------------------- 页面模板
+
+BASE_CSS = """
+:root { --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --accent:#4f46e5;
+  --border:#e5e7eb; --card:#f9fafb; --sidebar-w:280px; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111318; --fg:#e5e7eb; --muted:#9ca3af; --accent:#818cf8;
+          --border:#2d3139; --card:#1a1d24; } }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif; }
+a { color:var(--accent); text-decoration:none; }
+.wrap { max-width:1080px; margin:0 auto; padding:0 24px; }
+
+/* 顶栏 */
+header.site { border-bottom:1px solid var(--border); background:var(--bg);
+  position:sticky; top:0; z-index:10; }
+header.site .wrap { display:flex; align-items:center; gap:22px; height:56px; }
+header.site .brand { font-weight:800; font-size:18px; color:var(--fg); letter-spacing:.5px; }
+header.site nav { display:flex; gap:16px; font-size:14px; }
+header.site nav a { color:var(--muted); padding:4px 8px; border-radius:6px; }
+header.site nav a:hover { color:var(--accent); background:var(--card); }
+
+/* 首页文章列表 */
+.post-list { list-style:none; margin:36px auto; padding:0; max-width:760px; }
+.post-item { padding:20px 0; border-bottom:1px solid var(--border); }
+.post-item h2 { margin:0 0 6px; font-size:1.35em; }
+.post-item h2 a { color:var(--fg); }
+.post-item h2 a:hover { color:var(--accent); }
+.post-date { color:var(--muted); font-size:13px; }
+.post-excerpt { color:var(--muted); font-size:14px; line-height:1.7; margin-top:6px; }
+.tag { display:inline-block; background:var(--accent); color:#fff; opacity:.85;
+  border-radius:999px; padding:.05em .7em; font-size:.78em; margin-right:.4em; }
+.tagcloud { max-width:760px; margin:28px auto; padding-bottom:60px; }
+.tagcloud h3 { font-size:.95em; color:var(--muted); }
+
+/* 文章布局：左侧目录 */
+#layout { display:flex; align-items:flex-start; }
+#sidebar { width:var(--sidebar-w); flex:none; position:sticky; top:70px;
+  max-height:calc(100vh - 90px); overflow-y:auto; padding:20px 16px;
+  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  margin:32px 26px 60px 0; font-size:13px; }
+#sidebar .sb-title { font-weight:700; margin-bottom:10px; font-size:14px; word-break:break-all; }
+#sidebar nav a { display:block; padding:3px 8px; border-radius:6px; color:var(--fg); line-height:1.5; }
+#sidebar nav a:hover { color:var(--accent); background:var(--bg); }
+#sidebar nav a.lv3 { margin-left:1.1em; color:var(--muted); font-size:12.5px; }
+#main { flex:1; min-width:0; }
+#container { max-width:820px; padding:36px 0 140px; line-height:1.75; font-size:16px; }
+@media (max-width:900px) {
+  #layout { display:block; }
+  #sidebar { position:static; width:auto; max-height:none; margin:20px 0; }
+}
+
+/* 正文元素 */
+h1,h2,h3,h4 { line-height:1.35; margin-top:1.6em; }
+h1 { font-size:2em; border-bottom:2px solid var(--border); padding-bottom:.3em; }
+h2 { font-size:1.5em; border-bottom:1px solid var(--border); padding-bottom:.25em; }
+blockquote { border-left:4px solid var(--accent); margin:1em 0; padding:.4em 1em;
+  background:var(--card); border-radius:0 8px 8px 0; }
+code { background:var(--card); border:1px solid var(--border); border-radius:4px;
+  padding:.15em .4em; font-size:.88em; }
+pre code { display:block; padding:14px; overflow-x:auto; border-radius:10px; }
+table { border-collapse:collapse; width:100%; margin:1.2em 0; }
+th, td { border:1px solid var(--border); padding:8px 12px; text-align:left; }
+th { background:var(--card); }
+img { max-width:100%; }
+hr { border:none; border-top:1px solid var(--border); }
+.katex-display { overflow-x:auto; overflow-y:hidden; padding:4px 2px; }
+.math-error { color:#ef4444; background:rgba(239,68,68,.08); border-radius:6px;
+  padding:2px 6px; font-family:monospace; font-size:.85em; }
+
+/* 定理环境 */
+.thm-env { margin:1.2em 0; padding:.8em 1.1em; border-radius:8px;
+  background:var(--card); border-left:4px solid var(--accent); }
+.thm-env.proof { background:transparent; border-left-color:var(--border); }
+.thm-head { font-weight:700; font-style:italic; }
+.thm-env.proof .thm-head { font-style:normal; }
+.thm-title { font-weight:400; }
+.thm-body { margin-top:.35em; }
+.qed { float:right; }
+a.ref-link { border-bottom:1px dotted var(--accent); }
+
+/* Front Matter 卡片 */
+.fm-card { background:var(--card); border:1px solid var(--border); border-radius:10px;
+  padding:.9em 1.2em; margin-bottom:1.8em; font-size:.92em; }
+.fm-card h1 { margin:0 0 .3em; font-size:1.7em; border-bottom:none; padding-bottom:0; }
+.fm-meta { display:flex; flex-wrap:wrap; gap:.35em 1.4em; color:var(--muted); }
+.fm-tags { display:inline-flex; gap:.45em; flex-wrap:wrap; }
+.fm-tag { background:var(--accent); color:#fff; opacity:.85; border-radius:999px;
+  padding:.05em .7em; font-size:.82em; }
+
+/* 归档页 */
+.archive-group h3 { color:var(--muted); font-size:.95em; margin:30px 0 8px; }
+.archive-list { list-style:none; margin:0; padding:0; max-width:760px; }
+.archive-list li { padding:7px 0; border-bottom:1px dashed var(--border);
+  display:flex; justify-content:space-between; gap:16px; }
+.archive-list .d { color:var(--muted); font-size:13px; white-space:nowrap; }
+
+footer.site { border-top:1px solid var(--border); color:var(--muted);
+  font-size:13px; text-align:center; padding:26px 0; margin-top:40px; }
+@media print { header.site,#sidebar,footer.site { display:none; } #container{max-width:none;} }
+"""
+
+
+def page_shell(title: str, body: str, active: str = "") -> str:
+    e = html_mod.escape
+    def navlink(href, label, key):
+        cls = ' style="color:var(--accent);font-weight:600"' if key == active else ""
+        return f'<a href="{href}"{cls}>{label}</a>'
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{e(title)}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<style>{BASE_CSS}</style>
+</head>
+<body>
+<header class="site"><div class="wrap">
+  <a class="brand" href="index.html">📝 My Blog</a>
+  <nav>{navlink('index.html','首页','index')}{navlink('tags.html','归档','tags')}</nav>
+</div></header>
+{body}
+<footer class="site">Powered by Enhanced Markdown Reader · 数学 · 定理 · Crossref</footer>
+</body>
+</html>"""
+
+
+CDN_AND_PIPELINE = """<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>"""
+
+POST_TEMPLATE = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__TITLE__</title>
+__HEAD__
+<style>__CSS__</style>
+</head>
+<body>
+<header class="site"><div class="wrap">
+  <a class="brand" href="index.html">📝 My Blog</a>
+  <nav><a href="index.html">首页</a><a href="tags.html">归档</a></nav>
+</div></header>
+<div class="wrap"><div id="layout">
+  <aside id="sidebar">
+    <div class="sb-title">__SIDEBAR_TITLE__</div>
+    <div style="color:var(--muted);font-size:12px;margin-bottom:12px">__SIDEBAR_SUB__</div>
+    <nav id="toc"></nav>
+  </aside>
+  <div id="main"><article id="container"></article></div>
+</div></div>
+<footer class="site">Powered by Enhanced Markdown Reader · __DATE__</footer>
+<script>
+__CDN__
+</script>
+<script>
+__PIPELINE__
+
+// ==================== 博客文章渲染 ====================
+const container = document.getElementById("container");
+const SRC = __SRC_JSON__;
+
+(function renderPost(src) {
+  thmStore = []; crefStore = [];
+  for (const k in counters) delete counters[k];
+  const { meta, body } = parseFrontMatter(src);
+  if (meta && meta.title) document.title = meta.title;
+  let s = extractTheorems(body);
+  s = processCrossrefs(s);
+  const stashed = protectMath(s);
+  let html = marked.parse(stashed);
+  html = restoreMath(html);
+  html = renderTheorems(html);
+  if (meta) html = renderFrontMatter(meta) + html;
+  container.innerHTML = html;
+  renderBareEnvironments();
+  resolveCrossrefs(container);
+  // 左侧目录（toc:false 关闭）
+  const show = !meta || !/^(false|no)$/i.test(String(meta.toc));
+  const nav = document.getElementById("toc");
+  if (!show) { document.getElementById("sidebar").style.display = "none"; return; }
+  let i = 0; const lis = [];
+  container.querySelectorAll("h2, h3").forEach(h => {
+    if (!h.id) h.id = "sec-" + (++i);
+    lis.push(`<a class="${h.tagName === "H3" ? "lv3" : ""}" href="#${h.id}">${h.textContent}</a>`);
+  });
+  nav.innerHTML = lis.join("") || '<span style="color:var(--muted)">（无章节）</span>';
+})(SRC);
+</script>
+</body>
+</html>"""
+
+
+def esc(s):
+    return html_mod.escape(str(s))
+
+
+def build_index(posts, out_dir: Path):
+    items = []
+    for p in posts:
+        tags = " ".join(
+            f'<a class="tag" href="tags.html#{esc(t)}">{esc(t)}</a>' for t in p["tags"])
+        items.append(f"""<li class="post-item">
+  <h2><a href="{p['slug']}.html">{esc(p['title'])}</a></h2>
+  <div class="post-date">{esc(p['date'])}{(" &nbsp;·&nbsp; " + tags) if tags else ""}</div>
+  <div class="post-excerpt">{esc(p["excerpt"])}</div>
+</li>""")
+    tagcount = {}
+    for p in posts:
+        for t in p["tags"]:
+            tagcount[t] = tagcount.get(t, 0) + 1
+    cloud = " ".join(f'<a class="tag" href="tags.html#{esc(t)}">{esc(t)} ×{n}</a>'
+                     for t, n in sorted(tagcount.items(), key=lambda x: -x[1]))
+    body = f"""
+<div class="wrap">
+  <ul class="post-list">{"".join(items) or "<li class='post-item'>暂无文章 — 在 content/ 中添加 .md 后重新构建。</li>"}</ul>
+  <div class="tagcloud"><h3>🏷️ 标签</h3>{cloud}</div>
+</div>"""
+    (out_dir / "index.html").write_text(page_shell("My Blog", body, "index"), encoding="utf-8")
+
+
+def build_tags(posts, out_dir: Path):
+    bytag = {}
+    for p in posts:
+        for t in p["tags"]:
+            bytag.setdefault(t, []).append(p)
+    groups = []
+    for t, ps in sorted(bytag.items()):
+        lis = "".join(f'<li><a href="{p["slug"]}.html">{esc(p["title"])}</a>'
+                      f'<span class="d">{esc(p["date"])}</span></li>' for p in ps)
+        groups.append(f'<div class="archive-group" id="{esc(t)}"><h3>🏷️ {esc(t)}</h3>'
+                      f'<ul class="archive-list">{lis}</ul></div>')
+    body = f'<div class="wrap" style="max-width:820px">{"".join(groups) or "<p>暂无标签。</p>"}</div>'
+    (out_dir / "tags.html").write_text(page_shell("归档 · My Blog", body, "tags"), encoding="utf-8")
+
+
+def build_post(p, pipeline_js, out_dir: Path):
+    sub = f"{p['date']}"
+    html = (POST_TEMPLATE
+            .replace("__TITLE__", esc(p["title"]))
+            .replace("__SIDEBAR_TITLE__", esc(p["title"]))
+            .replace("__SIDEBAR_SUB__", esc(sub))
+            .replace("__DATE__", esc(p["date"]))
+            .replace("__HEAD__", '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">')
+            .replace("__CSS__", BASE_CSS)
+            .replace("__CDN__", CDN_AND_PIPELINE)
+            .replace("__PIPELINE__", pipeline_js)
+            .replace("__SRC_JSON__", json.dumps(p["body"], ensure_ascii=False)))
+    (out_dir / f"{p['slug']}.html").write_text(html, encoding="utf-8")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="增强 Markdown 静态博客系统")
+    ap.add_argument("--posts", default=str(HERE / "content"))
+    ap.add_argument("--out", default=str(HERE / "site"))
+    args = ap.parse_args()
+
+    posts_dir, out_dir = Path(args.posts).resolve(), Path(args.out).resolve()
+    if not posts_dir.exists():
+        sys.exit(f"错误：文章目录不存在 {posts_dir}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    pipeline_js = extract_pipeline_js(HERE / "index.html")
+    posts = load_posts(posts_dir)
+
+    build_index(posts, out_dir)
+    build_tags(posts, out_dir)
+    for p in posts:
+        build_post(p, pipeline_js, out_dir)
+
+    print(f"✅ 构建完成: {out_dir}")
+    print(f"   文章 {len(posts)} 篇 → index.html / tags.html / " +
+          " ".join(p["slug"] + ".html" for p in posts[:3]) + (" …" if len(posts) > 3 else ""))
+
+
+if __name__ == "__main__":
+    main()
