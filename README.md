@@ -26,6 +26,13 @@ python3 -m http.server 8000 --directory .
 # 浏览器访问 http://localhost:8000
 ```
 
+预览生成的博客时，可以使用项目内置的无缓存服务器：
+
+```bash
+python3 server.py                  # 服务 site/，默认 http://127.0.0.1:8000
+python3 server.py --build --port 8080  # 先重建，再以 8080 端口服务
+```
+
 界面按钮：
 
 | 按钮 | 功能 |
