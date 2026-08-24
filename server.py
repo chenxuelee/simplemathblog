@@ -22,11 +22,11 @@ HERE = Path(__file__).parent.resolve()
 class NoCacheHandler(SimpleHTTPRequestHandler):
     """开发预览时禁用缓存，刷新即可看到最新生成内容。"""
 
-    def end_headers(self):
+    def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: object) -> None:
         print(f"[{self.log_date_time_string()}] {args[0]}")
 
 
@@ -44,14 +44,14 @@ def source_snapshot(paths: tuple[Path, ...]) -> dict[str, int]:
     return snapshot
 
 
-def rebuild_site(site: Path, base_url: str = ""):
+def rebuild_site(site: Path, base_url: str = "") -> None:
     command = [sys.executable, str(HERE / "blog.py"), "--out", str(site)]
     if base_url:
         command += ["--base-url", base_url]
     subprocess.run(command, check=True)
 
 
-def watch_sources(paths: tuple[Path, ...], site: Path, interval: float, base_url: str):
+def watch_sources(paths: tuple[Path, ...], site: Path, interval: float, base_url: str) -> None:
     """在守护线程中轮询源文件；构建失败时保留上一版 site。"""
     previous = source_snapshot(paths)
     while True:
@@ -68,7 +68,7 @@ def watch_sources(paths: tuple[Path, ...], site: Path, interval: float, base_url
             print(f"❌ 自动重建失败（退出码 {error.returncode}）；将继续服务上一版站点。")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="预览 Enhanced Markdown Reader 静态站点")
     parser.add_argument("--site", default=str(HERE / "site"), help="静态站点目录")
     parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认仅本机）")

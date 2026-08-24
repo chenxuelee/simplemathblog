@@ -230,7 +230,7 @@ def convert(md_path: Path, out_path: Path, renderer_path: Path) -> Path:
     return out_path
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description="增强 Markdown → 单文件 HTML（左侧目录）")
     ap.add_argument("input", help="输入 .md 文件")
     ap.add_argument("-o", "--output", help="输出 .html 路径（默认同名 .html）")

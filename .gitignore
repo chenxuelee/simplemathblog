@@ -4,6 +4,7 @@
 # Python bytecode
 __pycache__/
 *.py[cod]
+.venv/
 
 # Node and Playwright local artifacts
 node_modules/

@@ -23,16 +23,16 @@
 
 ```bash
 # 或者本地起个服务（可选）
-python3 -m http.server 8000 --directory .
+uv run python -m http.server 8000 --directory .
 # 浏览器访问 http://localhost:8000
 ```
 
 预览生成的博客时，可以使用项目内置的无缓存服务器：
 
 ```bash
-python3 server.py                  # 服务 site/，默认 http://127.0.0.1:8000
-python3 server.py --build --port 8080  # 先重建，再以 8080 端口服务
-python3 server.py --watch              # 监视文章与渲染器改动，自动重建
+uv run python server.py                  # 服务 site/，默认 http://127.0.0.1:8000
+uv run python server.py --build --port 8080  # 先重建，再以 8080 端口服务
+uv run python server.py --watch              # 监视文章与渲染器改动，自动重建
 ```
 
 界面按钮：
@@ -52,13 +52,13 @@ python3 server.py --watch              # 监视文章与渲染器改动，自动
 
 ```bash
 # 基本用法（输出同名 .html）
-python3 md2html.py notes.md
+uv run python md2html.py notes.md
 
 # 指定输出路径
-python3 md2html.py notes.md -o notes_export.html
+uv run python md2html.py notes.md -o notes_export.html
 
 # 指定其他共享渲染器版本
-python3 md2html.py notes.md --renderer /path/to/renderer.js
+uv run python md2html.py notes.md --renderer /path/to/renderer.js
 ```
 
 导出文件的特点：
@@ -77,9 +77,9 @@ python3 md2html.py notes.md --renderer /path/to/renderer.js
 `blog.py` 把项目扩展为一个完整的**数学博客**：`content/` 目录放文章，一条命令生成整个静态站点。
 
 ```bash
-python3 blog.py                              # content/ → site/
-python3 blog.py --posts myposts --out dist   # 自定义文章/输出目录
-python3 blog.py --base-url https://example.com  # 生产部署：绝对 RSS/sitemap/SEO URL
+uv run python blog.py                              # content/ → site/
+uv run python blog.py --posts myposts --out dist   # 自定义文章/输出目录
+uv run python blog.py --base-url https://example.com  # 生产部署：绝对 RSS/sitemap/SEO URL
 ```
 
 ### 站点结构
@@ -114,7 +114,7 @@ draft: true                # 草稿：不发布
 
 ### 写作与部署
 
-写作流程：往 `content/` 丢 `.md` → `python3 blog.py` → 完成。部署只需把 `site/` 上传到任意静态托管（GitHub Pages、Netlify、Vercel 等）。
+写作流程：往 `content/` 丢 `.md` → `uv run python blog.py` → 完成。部署只需把 `site/` 上传到任意静态托管（GitHub Pages、Netlify、Vercel 等）。
 
 示例文章见 `content/fourier-series.md` 与 `banach-fixed-point.md`（覆盖定理环境 + crossref + 数学环境 + Front Matter 的完整用法）。
 
@@ -146,7 +146,7 @@ slug: custom-url
 ### 测试
 
 ```bash
-python3 -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
 ## 📐 数学环境

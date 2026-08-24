@@ -1,0 +1,6 @@
+[project]
+name = "enhanced-markdown-reader"
+version = "0.1.0"
+description = "Math-aware Markdown reader and static blog generator"
+requires-python = ">=3.11"
+dependencies = []

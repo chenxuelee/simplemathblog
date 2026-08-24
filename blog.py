@@ -24,12 +24,27 @@ import shutil
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any, TypedDict
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).parent))
 from md2html import extract_pipeline_js, json_for_script
 
 HERE = Path(__file__).parent.resolve()
+
+
+class Post(TypedDict):
+    slug: str
+    title: str
+    date: str
+    tags: list[str]
+    meta: dict[str, Any]
+    body: str
+    excerpt: str
+    description: str
+    updated: str
+    cover: str
+    series: str
 
 
 def plain_text(text: str) -> str:
@@ -60,7 +75,7 @@ def rss_date(value: str) -> str:
 
 # ---------------------------------------------------------------- front matter 解析（与阅读器一致的 Python 侧）
 
-def parse_fm(text):
+def parse_fm(text: str) -> tuple[dict[str, Any], str]:
     m = re.match(r"^---\r?\n([\s\S]*?)\r?\n---\r?\n?", text)
     if not m:
         return {}, text
@@ -90,8 +105,8 @@ def parse_fm(text):
     return meta, text[m.end():]
 
 
-def load_posts(posts_dir: Path):
-    posts = []
+def load_posts(posts_dir: Path) -> list[Post]:
+    posts: list[Post] = []
     for f in sorted(posts_dir.glob("*.md")) + sorted(posts_dir.glob("*.markdown")):
         raw = rewrite_local_links(f.read_text(encoding="utf-8"))
         meta, body = parse_fm(raw)
@@ -237,7 +252,7 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
 
 def page_shell(title: str, body: str, active: str = "", description: str = "", canonical: str = "") -> str:
     e = html_mod.escape
-    def navlink(href, label, key):
+    def navlink(href: str, label: str, key: str) -> str:
         cls = ' style="color:var(--accent);font-weight:600"' if key == active else ""
         return f'<a href="{href}"{cls}>{label}</a>'
     return f"""<!DOCTYPE html>
@@ -339,25 +354,25 @@ const COVER_HTML = __COVER_HTML__;
 </html>"""
 
 
-def esc(s):
+def esc(s: object) -> str:
     return html_mod.escape(str(s))
 
 
-def sync_assets(posts_dir: Path, out_dir: Path):
+def sync_assets(posts_dir: Path, out_dir: Path) -> None:
     """复制 content/assets；文章可直接写 ![](assets/example.png)。"""
     assets = posts_dir / "assets"
     if assets.is_dir():
         shutil.copytree(assets, out_dir / "assets", dirs_exist_ok=True)
 
 
-def related_posts(post, posts, limit=3):
+def related_posts(post: Post, posts: list[Post], limit: int = 3) -> list[Post]:
     tags = set(post["tags"])
     ranked = [p for p in posts if p["slug"] != post["slug"] and tags.intersection(p["tags"])]
     ranked.sort(key=lambda p: (-len(tags.intersection(p["tags"])), p["date"]), reverse=False)
     return ranked[:limit]
 
 
-def build_index(posts, out_dir: Path, base_url=""):
+def build_index(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
     items = []
     for p in posts:
         tags = " ".join(
@@ -391,7 +406,7 @@ input.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();
     (out_dir / "index.html").write_text(page_shell("My Blog", body + script, "index", canonical=absolute_url("index.html", base_url)), encoding="utf-8")
 
 
-def build_search(posts, out_dir: Path, base_url=""):
+def build_search(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
     body = """<div class="wrap"><div class="search-box"><h1>搜索</h1>
 <input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autofocus>
 <ul id="search-results" class="search-results"></ul></div></div>
@@ -403,13 +418,13 @@ input.addEventListener('input',run);</script>"""
     (out_dir / "search.html").write_text(page_shell("搜索 · My Blog", body, "search", canonical=absolute_url("search.html", base_url)), encoding="utf-8")
 
 
-def build_search_index(posts, out_dir: Path):
+def build_search_index(posts: list[Post], out_dir: Path) -> None:
     data = [{"title": p["title"], "excerpt": p["excerpt"], "url": f"{p['slug']}.html",
              "search": " ".join([p["title"], p["excerpt"], *p["tags"]]).lower()} for p in posts]
     (out_dir / "search-index.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
-def build_rss(posts, out_dir: Path, base_url=""):
+def build_rss(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
     items = "".join(f"<item><title>{esc(p['title'])}</title><link>{esc(absolute_url(p['slug'] + '.html', base_url))}</link>"
                     f"<guid>{esc(absolute_url(p['slug'] + '.html', base_url))}</guid><pubDate>{esc(rss_date(p['date']))}</pubDate>"
                     f"<description>{esc(p['description'])}</description></item>" for p in posts)
@@ -417,14 +432,14 @@ def build_rss(posts, out_dir: Path, base_url=""):
     (out_dir / "rss.xml").write_text(rss, encoding="utf-8")
 
 
-def build_sitemap(posts, out_dir: Path, base_url=""):
+def build_sitemap(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
     urls = ["index.html", "tags.html", "search.html", *[f"{p['slug']}.html" for p in posts]]
     xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(
         f"<url><loc>{esc(absolute_url(url, base_url))}</loc></url>" for url in urls) + "</urlset>"
     (out_dir / "sitemap.xml").write_text(xml, encoding="utf-8")
 
 
-def build_tags(posts, out_dir: Path, base_url=""):
+def build_tags(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
     bytag = {}
     for p in posts:
         for t in p["tags"]:
@@ -439,7 +454,9 @@ def build_tags(posts, out_dir: Path, base_url=""):
     (out_dir / "tags.html").write_text(page_shell("归档 · My Blog", body, "tags", canonical=absolute_url("tags.html", base_url)), encoding="utf-8")
 
 
-def build_post(p, pipeline_js, out_dir: Path, newer=None, older=None, related=(), base_url=""):
+def build_post(p: Post, pipeline_js: str, out_dir: Path, newer: Post | None = None,
+               older: Post | None = None, related: tuple[Post, ...] | list[Post] = (),
+               base_url: str = "") -> None:
     sub = f"{p['date']}"
     cover = f'<img class="cover" src="{esc(p["cover"])}" alt="{esc(p["title"])}">' if p["cover"] else ""
     nav = '<nav class="post-nav">' + (f'<a href="{esc(newer["slug"])}.html">← {esc(newer["title"])}</a>' if newer else '<span></span>') + (f'<a href="{esc(older["slug"])}.html">{esc(older["title"])} →</a>' if older else '<span></span>') + '</nav>'
@@ -466,7 +483,7 @@ def build_post(p, pipeline_js, out_dir: Path, newer=None, older=None, related=()
     (out_dir / f"{p['slug']}.html").write_text(html, encoding="utf-8")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description="增强 Markdown 静态博客系统")
     ap.add_argument("--posts", default=str(HERE / "content"))
     ap.add_argument("--out", default=str(HERE / "site"))
