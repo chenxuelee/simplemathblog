@@ -4,7 +4,7 @@ enhanced-md2html.py —— 把增强 Markdown（数学环境 / AMSL 定理环境
 YAML Front Matter）转换为单个独立 HTML 文件，目录渲染在左侧边栏。
 
 用法:
-    python3 md2html.py input.md [-o output.html] [--reader path/to/index.html]
+    python3 md2html.py input.md [-o output.html] [--renderer path/to/renderer.js]
 
 原理:
     复用阅读器 index.html 中经过验证的 JS 渲染管线（占位符隔离 → marked → KaTeX
@@ -23,20 +23,15 @@ import sys
 from datetime import date
 from pathlib import Path
 
-DEFAULT_READER = Path(__file__).with_name("index.html")
+DEFAULT_RENDERER = Path(__file__).with_name("renderer.js")
 
 # ---------------------------------------------------------------- reader 管线提取
 
-def extract_pipeline_js(reader_path: Path) -> str:
-    """从 index.html 中由显式标记圈出的渲染管线抽取 JavaScript。"""
-    html = reader_path.read_text(encoding="utf-8")
-    m = re.search(
-        r"// ============ EXPORTABLE_RENDER_PIPELINE_START ============"
-        r"([\s\S]*?)"
-        r"// ============ EXPORTABLE_RENDER_PIPELINE_END ============", html)
-    if not m:
-        sys.exit(f"错误：在 {reader_path} 中找不到导出渲染管线标记")
-    return m.group(1).strip()
+def extract_pipeline_js(renderer_path: Path = DEFAULT_RENDERER) -> str:
+    """读取唯一的共享渲染管线；导出页会将其内联以保持单文件特性。"""
+    if not renderer_path.is_file():
+        sys.exit(f"错误：找不到渲染器 {renderer_path}")
+    return renderer_path.read_text(encoding="utf-8").strip()
 
 
 def json_for_script(value: str) -> str:
@@ -210,9 +205,9 @@ renderExport(SRC);
 """
 
 
-def convert(md_path: Path, out_path: Path, reader_path: Path) -> Path:
+def convert(md_path: Path, out_path: Path, renderer_path: Path) -> Path:
     src = md_path.read_text(encoding="utf-8")
-    pipeline = extract_pipeline_js(reader_path)
+    pipeline = extract_pipeline_js(renderer_path)
 
     # 侧栏标题：优先 Front Matter 的 title，否则用第一个 h1，否则文件名
     fm_title = None
@@ -239,8 +234,8 @@ def main():
     ap = argparse.ArgumentParser(description="增强 Markdown → 单文件 HTML（左侧目录）")
     ap.add_argument("input", help="输入 .md 文件")
     ap.add_argument("-o", "--output", help="输出 .html 路径（默认同名 .html）")
-    ap.add_argument("--reader", default=str(DEFAULT_READER),
-                    help=f"阅读器 index.html 路径（默认 {DEFAULT_READER}）")
+    ap.add_argument("--renderer", default=str(DEFAULT_RENDERER),
+                    help=f"共享 renderer.js 路径（默认 {DEFAULT_RENDERER}）")
     args = ap.parse_args()
 
     md_path = Path(args.input).expanduser().resolve()
@@ -249,13 +244,11 @@ def main():
     if md_path.suffix.lower() not in {".md", ".markdown", ".txt"}:
         sys.exit(f"错误：输入应为 Markdown 文件（.md/.markdown/.txt），收到 {md_path.name}。\n"
                  f"（防止误把 HTML 等文件当输入而覆盖重要文件）")
-    reader_path = Path(args.reader).expanduser().resolve()
-    if not reader_path.exists():
-        sys.exit(f"错误：找不到阅读器 {reader_path}")
+    renderer_path = Path(args.renderer).expanduser().resolve()
 
     out_path = (Path(args.output).expanduser().resolve() if args.output
                 else md_path.with_suffix(".html"))
-    convert(md_path, out_path, reader_path)
+    convert(md_path, out_path, renderer_path)
     print(f"✅ 已生成: {out_path}  ({out_path.stat().st_size:,} bytes)")
 
 

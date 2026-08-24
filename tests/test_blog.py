@@ -3,8 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from blog import load_posts, main as build_site
+from blog import absolute_url, load_posts, main as build_site, rss_date
 from md2html import json_for_script
+from server import source_snapshot
 
 
 class BlogBuildTests(unittest.TestCase):
@@ -20,6 +21,21 @@ class BlogBuildTests(unittest.TestCase):
             item = load_posts(posts)[0]
             self.assertIn("two.html#part", item["body"])
 
+    def test_production_url_helpers(self):
+        self.assertEqual(absolute_url("文章.html", "https://example.com/"), "https://example.com/%E6%96%87%E7%AB%A0.html")
+        self.assertEqual(rss_date("2026-01-02"), "Fri, 02 Jan 2026 00:00:00 +0000")
+
+    def test_source_snapshot_tracks_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "content" / "post.md"
+            target.parent.mkdir()
+            target.write_text("one", encoding="utf-8")
+            first = source_snapshot((root / "content",))
+            self.assertIn(str(target), first)
+            target.write_text("two", encoding="utf-8")
+            self.assertNotEqual(first, source_snapshot((root / "content",)))
+
     def test_full_build_writes_publishable_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -31,7 +47,7 @@ class BlogBuildTests(unittest.TestCase):
             import sys
             old_argv = sys.argv
             try:
-                sys.argv = ["blog.py", "--posts", str(posts), "--out", str(output)]
+                sys.argv = ["blog.py", "--posts", str(posts), "--out", str(output), "--base-url", "https://example.test/blog"]
                 build_site()
             finally:
                 sys.argv = old_argv
@@ -41,6 +57,7 @@ class BlogBuildTests(unittest.TestCase):
             data = json.loads((output / "search-index.json").read_text(encoding="utf-8"))
             self.assertEqual([p["title"] for p in data], ["A", "B"])
             self.assertIn("a.html", (output / "b.html").read_text(encoding="utf-8"))
+            self.assertIn("https://example.test/blog/a.html", (output / "sitemap.xml").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

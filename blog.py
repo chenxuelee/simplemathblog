@@ -9,7 +9,7 @@ blog.py —— 基于增强 Markdown 的静态博客系统。
 
 特性:
     - 全部增强语法支持：数学环境 / AMSL 定理环境 / crossref / Front Matter
-      （复用 md2html.extract_pipeline_js 提取的阅读器渲染管线，浏览器端渲染）
+      （复用 renderer.js 的共享渲染管线，浏览器端渲染）
     - 首页：按日期倒序的文章列表 + 标签云
     - 文章页：元数据卡片 + 左侧目录侧栏（toc: false 可关闭）
     - tags.html：标签归档页
@@ -22,7 +22,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -43,6 +43,20 @@ def rewrite_local_links(text: str) -> str:
     """博客根目录中将 Markdown 文章链接改为生成的 HTML 链接。"""
     return re.sub(r"(\]\()([^:)#]+)\.(?:md|markdown)(#[^)]+)?(\))",
                   lambda m: f"{m.group(1)}{m.group(2)}.html{m.group(3) or ''}{m.group(4)}", text)
+
+
+def absolute_url(path: str, base_url: str = "") -> str:
+    """为 RSS、sitemap 与 meta 标签生成规范 URL。"""
+    encoded = quote(path.lstrip("/"), safe="/%#?=&")
+    return f"{base_url.rstrip('/')}/{encoded}" if base_url else encoded
+
+
+def rss_date(value: str) -> str:
+    """将 Front Matter 的 ISO 日期转换为 RSS 所需的 RFC 822 日期。"""
+    try:
+        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    except ValueError:
+        return value
 
 # ---------------------------------------------------------------- front matter 解析（与阅读器一致的 Python 侧）
 
@@ -221,7 +235,7 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
 """
 
 
-def page_shell(title: str, body: str, active: str = "") -> str:
+def page_shell(title: str, body: str, active: str = "", description: str = "", canonical: str = "") -> str:
     e = html_mod.escape
     def navlink(href, label, key):
         cls = ' style="color:var(--accent);font-weight:600"' if key == active else ""
@@ -232,6 +246,8 @@ def page_shell(title: str, body: str, active: str = "") -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{e(title)}</title>
+<meta name="description" content="{e(description)}">
+{f'<link rel="canonical" href="{e(canonical)}">' if canonical else ''}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 <style>{BASE_CSS}</style>
@@ -261,6 +277,8 @@ POST_TEMPLATE = """<!DOCTYPE html>
 <meta name="description" content="__DESCRIPTION__">
 <meta property="og:title" content="__TITLE__">
 <meta property="og:description" content="__DESCRIPTION__">
+<meta property="og:url" content="__OG_URL__">
+<link rel="canonical" href="__CANONICAL__">
 __COVER_META__
 __HEAD__
 <style>__CSS__</style>
@@ -339,7 +357,7 @@ def related_posts(post, posts, limit=3):
     return ranked[:limit]
 
 
-def build_index(posts, out_dir: Path):
+def build_index(posts, out_dir: Path, base_url=""):
     items = []
     for p in posts:
         tags = " ".join(
@@ -370,10 +388,10 @@ input.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();
  const found=q?searchIndex.filter(p=>p.search.includes(q)).slice(0,8):[];
  results.innerHTML=found.map(p=>`<li><a href="${esc(p.url)}">${esc(p.title)}</a><div class="post-excerpt">${esc(p.excerpt)}</div></li>`).join('');});
 </script>"""
-    (out_dir / "index.html").write_text(page_shell("My Blog", body + script, "index"), encoding="utf-8")
+    (out_dir / "index.html").write_text(page_shell("My Blog", body + script, "index", canonical=absolute_url("index.html", base_url)), encoding="utf-8")
 
 
-def build_search(posts, out_dir: Path):
+def build_search(posts, out_dir: Path, base_url=""):
     body = """<div class="wrap"><div class="search-box"><h1>搜索</h1>
 <input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autofocus>
 <ul id="search-results" class="search-results"></ul></div></div>
@@ -382,7 +400,7 @@ fetch('search-index.json').then(r=>r.json()).then(x=>{data=x;run();});
 function run(){const q=input.value.trim().toLowerCase(),found=q?data.filter(p=>p.search.includes(q)):data;
 results.innerHTML=found.map(p=>`<li><a href="${esc(p.url)}">${esc(p.title)}</a><div class="post-excerpt">${esc(p.excerpt)}</div></li>`).join('');}
 input.addEventListener('input',run);</script>"""
-    (out_dir / "search.html").write_text(page_shell("搜索 · My Blog", body, "search"), encoding="utf-8")
+    (out_dir / "search.html").write_text(page_shell("搜索 · My Blog", body, "search", canonical=absolute_url("search.html", base_url)), encoding="utf-8")
 
 
 def build_search_index(posts, out_dir: Path):
@@ -391,22 +409,22 @@ def build_search_index(posts, out_dir: Path):
     (out_dir / "search-index.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
-def build_rss(posts, out_dir: Path):
-    items = "".join(f"<item><title>{esc(p['title'])}</title><link>{quote(p['slug'])}.html</link>"
-                    f"<guid>{quote(p['slug'])}.html</guid><pubDate>{esc(p['date'])}</pubDate>"
+def build_rss(posts, out_dir: Path, base_url=""):
+    items = "".join(f"<item><title>{esc(p['title'])}</title><link>{esc(absolute_url(p['slug'] + '.html', base_url))}</link>"
+                    f"<guid>{esc(absolute_url(p['slug'] + '.html', base_url))}</guid><pubDate>{esc(rss_date(p['date']))}</pubDate>"
                     f"<description>{esc(p['description'])}</description></item>" for p in posts)
-    rss = f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>My Blog</title><link>./</link><description>数学博客</description>{items}</channel></rss>'
+    rss = f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>My Blog</title><link>{esc(base_url or "./")}</link><description>数学博客</description>{items}</channel></rss>'
     (out_dir / "rss.xml").write_text(rss, encoding="utf-8")
 
 
-def build_sitemap(posts, out_dir: Path):
+def build_sitemap(posts, out_dir: Path, base_url=""):
     urls = ["index.html", "tags.html", "search.html", *[f"{p['slug']}.html" for p in posts]]
     xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(
-        f"<url><loc>{quote(url)}</loc></url>" for url in urls) + "</urlset>"
+        f"<url><loc>{esc(absolute_url(url, base_url))}</loc></url>" for url in urls) + "</urlset>"
     (out_dir / "sitemap.xml").write_text(xml, encoding="utf-8")
 
 
-def build_tags(posts, out_dir: Path):
+def build_tags(posts, out_dir: Path, base_url=""):
     bytag = {}
     for p in posts:
         for t in p["tags"]:
@@ -418,10 +436,10 @@ def build_tags(posts, out_dir: Path):
         groups.append(f'<div class="archive-group" id="{esc(t)}"><h3>🏷️ {esc(t)}</h3>'
                       f'<ul class="archive-list">{lis}</ul></div>')
     body = f'<div class="wrap" style="max-width:820px">{"".join(groups) or "<p>暂无标签。</p>"}</div>'
-    (out_dir / "tags.html").write_text(page_shell("归档 · My Blog", body, "tags"), encoding="utf-8")
+    (out_dir / "tags.html").write_text(page_shell("归档 · My Blog", body, "tags", canonical=absolute_url("tags.html", base_url)), encoding="utf-8")
 
 
-def build_post(p, pipeline_js, out_dir: Path, newer=None, older=None, related=()):
+def build_post(p, pipeline_js, out_dir: Path, newer=None, older=None, related=(), base_url=""):
     sub = f"{p['date']}"
     cover = f'<img class="cover" src="{esc(p["cover"])}" alt="{esc(p["title"])}">' if p["cover"] else ""
     nav = '<nav class="post-nav">' + (f'<a href="{esc(newer["slug"])}.html">← {esc(newer["title"])}</a>' if newer else '<span></span>') + (f'<a href="{esc(older["slug"])}.html">{esc(older["title"])} →</a>' if older else '<span></span>') + '</nav>'
@@ -432,7 +450,9 @@ def build_post(p, pipeline_js, out_dir: Path, newer=None, older=None, related=()
     html = (POST_TEMPLATE
             .replace("__TITLE__", esc(p["title"]))
             .replace("__DESCRIPTION__", esc(p["description"]))
-            .replace("__COVER_META__", f'<meta property="og:image" content="{esc(p["cover"])}">' if p["cover"] else "")
+            .replace("__CANONICAL__", absolute_url(p["slug"] + ".html", base_url))
+            .replace("__OG_URL__", absolute_url(p["slug"] + ".html", base_url))
+            .replace("__COVER_META__", f'<meta property="og:image" content="{esc(absolute_url(p["cover"], base_url))}">' if p["cover"] else "")
             .replace("__SIDEBAR_TITLE__", esc(p["title"]))
             .replace("__SIDEBAR_SUB__", esc(sub))
             .replace("__DATE__", esc(p["updated"]))
@@ -450,6 +470,7 @@ def main():
     ap = argparse.ArgumentParser(description="增强 Markdown 静态博客系统")
     ap.add_argument("--posts", default=str(HERE / "content"))
     ap.add_argument("--out", default=str(HERE / "site"))
+    ap.add_argument("--base-url", default="", help="生产站点根 URL，例如 https://example.com")
     args = ap.parse_args()
 
     posts_dir, out_dir = Path(args.posts).resolve(), Path(args.out).resolve()
@@ -457,21 +478,24 @@ def main():
         sys.exit(f"错误：文章目录不存在 {posts_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pipeline_js = extract_pipeline_js(HERE / "index.html")
+    pipeline_js = extract_pipeline_js(HERE / "renderer.js")
     posts = load_posts(posts_dir)
 
     sync_assets(posts_dir, out_dir)
-    build_index(posts, out_dir)
-    build_tags(posts, out_dir)
-    build_search(posts, out_dir)
+    base_url = args.base_url.rstrip("/")
+    if not base_url:
+        print("⚠️  未设置 --base-url：RSS、sitemap 和 canonical 将使用相对 URL；部署前请补充。")
+    build_index(posts, out_dir, base_url)
+    build_tags(posts, out_dir, base_url)
+    build_search(posts, out_dir, base_url)
     build_search_index(posts, out_dir)
-    build_rss(posts, out_dir)
-    build_sitemap(posts, out_dir)
+    build_rss(posts, out_dir, base_url)
+    build_sitemap(posts, out_dir, base_url)
     for i, p in enumerate(posts):
         build_post(p, pipeline_js, out_dir,
                    newer=posts[i - 1] if i else None,
                    older=posts[i + 1] if i + 1 < len(posts) else None,
-                   related=related_posts(p, posts))
+                   related=related_posts(p, posts), base_url=base_url)
 
     print(f"✅ 构建完成: {out_dir}")
     print(f"   文章 {len(posts)} 篇 → index.html / tags.html / search.html / rss.xml / sitemap.xml / " +

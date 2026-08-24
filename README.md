@@ -12,6 +12,7 @@
 - **Front Matter** —— YAML 元数据块渲染为标题卡片（作者/日期/标签），支持自动目录
 - **单文件 HTML 导出** —— 附带 `md2html.py`，一键转换为带左侧目录侧栏的独立 HTML
 - **静态博客系统** —— 附带 `blog.py`，`content/` 目录一键生成完整站点（首页 / 标签归档 / 文章页）
+- **共享渲染管线** —— `renderer.js` 被阅读器直接加载，并由两种导出路径内联，三处渲染逻辑保持同源
 - **自定义宏** —— 内置 `\RR`、`\norm` 等常用宏，可自行扩展
 - **阅读体验** —— GFM 表格与任务列表、代码高亮、深色模式自适应、长公式横向滚动
 - **使用方式** —— 打开本地 `.md` 文件、拖拽进窗口、或直接在编辑器中书写实时预览；一键导出 PDF
@@ -31,6 +32,7 @@ python3 -m http.server 8000 --directory .
 ```bash
 python3 server.py                  # 服务 site/，默认 http://127.0.0.1:8000
 python3 server.py --build --port 8080  # 先重建，再以 8080 端口服务
+python3 server.py --watch              # 监视文章与渲染器改动，自动重建
 ```
 
 界面按钮：
@@ -55,8 +57,8 @@ python3 md2html.py notes.md
 # 指定输出路径
 python3 md2html.py notes.md -o notes_export.html
 
-# 指定其他阅读器版本作为管线来源
-python3 md2html.py notes.md --reader /path/to/index.html
+# 指定其他共享渲染器版本
+python3 md2html.py notes.md --renderer /path/to/renderer.js
 ```
 
 导出文件的特点：
@@ -77,6 +79,7 @@ python3 md2html.py notes.md --reader /path/to/index.html
 ```bash
 python3 blog.py                              # content/ → site/
 python3 blog.py --posts myposts --out dist   # 自定义文章/输出目录
+python3 blog.py --base-url https://example.com  # 生产部署：绝对 RSS/sitemap/SEO URL
 ```
 
 ### 站点结构
