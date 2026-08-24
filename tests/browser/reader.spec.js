@@ -12,4 +12,9 @@ test('reader renders math, theorem, cross-reference, and callout', async ({ page
   await page.locator('#btn-edit').click();
   await expect(page.locator('blockquote')).toContainText('提示：浏览器测试');
   await expect(page.locator('.katex')).toBeVisible();
+
+  await page.locator('#btn-edit').click();
+  await editor.fill('[unsafe](javascript:alert(1))');
+  await page.locator('#btn-edit').click();
+  await expect(page.locator('#container a')).toHaveCount(0);
 });

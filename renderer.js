@@ -163,6 +163,15 @@ function esc(s){
     .replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
+// Markdown may come from files shared by other people. Escaping HTML is not
+// sufficient for URLs: javascript: remains executable when used in href.
+function safeUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (/^(https?:|mailto:|#|\/(?!\/)|\.\.?\/)/i.test(url)) return url;
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) ? "" : url; // ordinary relative path
+}
+
 // ============ 交叉引用 ============
 // 处理 \ref{...}, \eqref{...}, \autoref{...} —— 在公式渲染前替换为占位，
 // 公式渲染后回填为链接。同时处理公式内的 \label -> 自动 \tag。
@@ -203,6 +212,14 @@ function resolveCrossrefs(root) {
 // marked 配置
 const markdownRenderer = new marked.Renderer();
 markdownRenderer.html = raw => esc(raw);
+markdownRenderer.link = (href, title, text) => {
+  const safe = safeUrl(href);
+  return safe ? `<a href="${esc(safe)}"${title ? ` title="${esc(title)}"` : ""}>${text}</a>` : text;
+};
+markdownRenderer.image = (href, title, text) => {
+  const safe = safeUrl(href);
+  return safe ? `<img src="${esc(safe)}" alt="${esc(text || "")}"${title ? ` title="${esc(title)}"` : ""}>` : esc(text || "");
+};
 marked.setOptions({
   gfm: true, breaks: false,
   renderer: markdownRenderer,
@@ -259,7 +276,7 @@ function renderFrontMatter(meta) {
     const tags = Array.isArray(meta.tags) ? meta.tags : String(meta.tags).split(/[,，]\s*/);
     if (tags.length) html += `<div style="margin-top:.5em"><span class="fm-tags">${tags.map(t=>`<span class="fm-tag">${esc2(t)}</span>`).join("")}</span></div>`;
   }
-  if (meta.cover) html += `<img class="cover zoomable" src="${esc2(meta.cover)}" alt="${esc2(meta.title || "封面")}">`;
+  if (meta.cover && safeUrl(meta.cover)) html += `<img class="cover zoomable" src="${esc2(safeUrl(meta.cover))}" alt="${esc2(meta.title || "封面")}">`;
   html += "</div>";
   return html;
 }

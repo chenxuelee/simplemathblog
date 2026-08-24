@@ -10,7 +10,7 @@
 <meta property="og:url" content="banach-fixed-point.html">
 <link rel="canonical" href="banach-fixed-point.html">
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="assets/vendor/katex/katex.min.css"><link rel="stylesheet" href="assets/vendor/github-dark.min.css">
 <style>
 :root { --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --accent:#4f46e5;
   --border:#e5e7eb; --card:#f9fafb; --sidebar-w:280px; }
@@ -139,10 +139,9 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
   <div id="main"><article id="container"></article><nav class="post-nav"><a href="fourier-series.html">← 傅里叶级数与 Dirichlet 收敛</a><span></span></nav><section class="related"><b>相关文章</b><ul><li><a href="fourier-series.html">傅里叶级数与 Dirichlet 收敛</a></li></ul></section></div>
 </div></div>
 <footer class="site">Powered by Enhanced Markdown Reader · 2026-08-20</footer>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/vendor/marked.min.js"></script>
+<script src="assets/vendor/katex/katex.min.js"></script>
+<script src="assets/vendor/highlight.min.js"></script>
 <script>
 /* Shared Enhanced Markdown rendering pipeline. */
 // ============ 核心：数学感知的 Markdown 渲染管线 ============
@@ -309,6 +308,15 @@ function esc(s){
     .replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
+// Markdown may come from files shared by other people. Escaping HTML is not
+// sufficient for URLs: javascript: remains executable when used in href.
+function safeUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (/^(https?:|mailto:|#|\/(?!\/)|\.\.?\/)/i.test(url)) return url;
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) ? "" : url; // ordinary relative path
+}
+
 // ============ 交叉引用 ============
 // 处理 \ref{...}, \eqref{...}, \autoref{...} —— 在公式渲染前替换为占位，
 // 公式渲染后回填为链接。同时处理公式内的 \label -> 自动 \tag。
@@ -349,6 +357,14 @@ function resolveCrossrefs(root) {
 // marked 配置
 const markdownRenderer = new marked.Renderer();
 markdownRenderer.html = raw => esc(raw);
+markdownRenderer.link = (href, title, text) => {
+  const safe = safeUrl(href);
+  return safe ? `<a href="${esc(safe)}"${title ? ` title="${esc(title)}"` : ""}>${text}</a>` : text;
+};
+markdownRenderer.image = (href, title, text) => {
+  const safe = safeUrl(href);
+  return safe ? `<img src="${esc(safe)}" alt="${esc(text || "")}"${title ? ` title="${esc(title)}"` : ""}>` : esc(text || "");
+};
 marked.setOptions({
   gfm: true, breaks: false,
   renderer: markdownRenderer,
@@ -405,7 +421,7 @@ function renderFrontMatter(meta) {
     const tags = Array.isArray(meta.tags) ? meta.tags : String(meta.tags).split(/[,，]\s*/);
     if (tags.length) html += `<div style="margin-top:.5em"><span class="fm-tags">${tags.map(t=>`<span class="fm-tag">${esc2(t)}</span>`).join("")}</span></div>`;
   }
-  if (meta.cover) html += `<img class="cover zoomable" src="${esc2(meta.cover)}" alt="${esc2(meta.title || "封面")}">`;
+  if (meta.cover && safeUrl(meta.cover)) html += `<img class="cover zoomable" src="${esc2(safeUrl(meta.cover))}" alt="${esc2(meta.title || "封面")}">`;
   html += "</div>";
   return html;
 }

@@ -22,13 +22,15 @@ import json
 import re
 import shutil
 import sys
+import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).parent))
-from md2html import extract_pipeline_js, json_for_script
+from frontmatter import parse_front_matter
+from md2html import RUNTIME_ASSETS, extract_pipeline_js, json_for_script
 
 HERE = Path(__file__).parent.resolve()
 
@@ -75,46 +77,42 @@ def rss_date(value: str) -> str:
 
 # ---------------------------------------------------------------- front matter 解析（与阅读器一致的 Python 侧）
 
-def parse_fm(text: str) -> tuple[dict[str, Any], str]:
-    m = re.match(r"^---\r?\n([\s\S]*?)\r?\n---\r?\n?", text)
-    if not m:
-        return {}, text
-    meta, key = {}, None
-    for line in m.group(1).splitlines():
-        t = line.strip()
-        if not t or t.startswith("#"):
-            continue
-        li = re.match(r"^-\s+(.+)$", t)
-        if li and key:
-            meta.setdefault(key, [])
-            if not isinstance(meta[key], list):
-                meta[key] = [meta[key]]
-            meta[key].append(li.group(1).strip().strip("\"'"))
-            continue
-        kv = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", t)
-        if not kv:
-            continue
-        key, val = kv.group(1), kv.group(2).strip()
-        arr = re.match(r"^\[(.*)\]$", val)
-        if arr:
-            meta[key] = [s.strip().strip("\"'") for s in arr.group(1).split(",") if s.strip()]
-        elif val == "":
-            meta[key] = ""
-        else:
-            meta[key] = val.strip("\"'")
-    return meta, text[m.end():]
+def validate_slug(value: object, source: Path) -> str:
+    slug = str(value).strip()
+    if not slug or slug in {".", ".."} or Path(slug).name != slug or slug.endswith(".html"):
+        raise ValueError(f"{source.name}: slug 必须是单个文件名，不能包含路径或 .html 后缀")
+    return slug
+
+
+def validate_date(value: object, field: str, source: Path) -> str:
+    raw = str(value).strip()
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError as error:
+        raise ValueError(f"{source.name}: {field} 必须是 YYYY-MM-DD 日期") from error
+
+
+def validate_resource_url(value: object, field: str, source: Path) -> str:
+    url = str(value).strip()
+    if not url:
+        return ""
+    if re.match(r"^https?://", url):
+        return url
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url) or ".." in Path(url).parts:
+        raise ValueError(f"{source.name}: {field} 只允许 http(s) URL 或站点内相对路径")
+    return url
 
 
 def load_posts(posts_dir: Path) -> list[Post]:
     posts: list[Post] = []
     for f in sorted(posts_dir.glob("*.md")) + sorted(posts_dir.glob("*.markdown")):
         raw = rewrite_local_links(f.read_text(encoding="utf-8"))
-        meta, body = parse_fm(raw)
+        meta, body = parse_front_matter(raw)
         if meta.get("draft", "").lower() in ("true", "yes"):
             continue
-        slug = str(meta.get("slug") or f.stem)
+        slug = validate_slug(meta.get("slug") or f.stem, f)
         title = str(meta.get("title") or slug)
-        d = str(meta.get("date") or date.today().isoformat())
+        d = validate_date(meta.get("date") or date.today().isoformat(), "date", f)
         tags = meta.get("tags") or []
         if isinstance(tags, str):
             tags = [t.strip() for t in re.split(r"[,，]", tags) if t.strip()]
@@ -126,8 +124,8 @@ def load_posts(posts_dir: Path) -> list[Post]:
         posts.append({"slug": slug, "title": title, "date": d, "tags": tags,
                       "meta": meta, "body": raw, "excerpt": excerpt,
                       "description": str(meta.get("description") or excerpt),
-                      "updated": str(meta.get("updated") or d),
-                      "cover": str(meta.get("cover") or ""),
+                      "updated": validate_date(meta.get("updated") or d, "updated", f),
+                      "cover": validate_resource_url(meta.get("cover") or "", "cover", f),
                       "series": str(meta.get("series") or "")})
     posts.sort(key=lambda p: p["date"], reverse=True)
     return posts
@@ -263,8 +261,8 @@ def page_shell(title: str, body: str, active: str = "", description: str = "", c
 <title>{e(title)}</title>
 <meta name="description" content="{e(description)}">
 {f'<link rel="canonical" href="{e(canonical)}">' if canonical else ''}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<link rel="stylesheet" href="assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="assets/vendor/github-dark.min.css">
 <style>{BASE_CSS}</style>
 </head>
 <body>
@@ -278,10 +276,9 @@ def page_shell(title: str, body: str, active: str = "", description: str = "", c
 </html>"""
 
 
-CDN_AND_PIPELINE = """<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>"""
+CDN_AND_PIPELINE = """<script src="assets/vendor/marked.min.js"></script>
+<script src="assets/vendor/katex/katex.min.js"></script>
+<script src="assets/vendor/highlight.min.js"></script>"""
 
 POST_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -363,6 +360,9 @@ def sync_assets(posts_dir: Path, out_dir: Path) -> None:
     assets = posts_dir / "assets"
     if assets.is_dir():
         shutil.copytree(assets, out_dir / "assets", dirs_exist_ok=True)
+    if not RUNTIME_ASSETS.is_dir():
+        raise RuntimeError(f"找不到离线渲染资源：{RUNTIME_ASSETS}")
+    shutil.copytree(RUNTIME_ASSETS, out_dir / "assets" / "vendor", dirs_exist_ok=True)
 
 
 def related_posts(post: Post, posts: list[Post], limit: int = 3) -> list[Post]:
@@ -474,7 +474,7 @@ def build_post(p: Post, pipeline_js: str, out_dir: Path, newer: Post | None = No
             .replace("__SIDEBAR_SUB__", esc(sub))
             .replace("__DATE__", esc(p["updated"]))
             .replace("__POST_NAV__", nav + related_html)
-            .replace("__HEAD__", '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">')
+            .replace("__HEAD__", '<link rel="stylesheet" href="assets/vendor/katex/katex.min.css"><link rel="stylesheet" href="assets/vendor/github-dark.min.css">')
             .replace("__CSS__", BASE_CSS)
             .replace("__CDN__", CDN_AND_PIPELINE)
             .replace("__PIPELINE__", pipeline_js)
@@ -493,26 +493,46 @@ def main() -> None:
     posts_dir, out_dir = Path(args.posts).resolve(), Path(args.out).resolve()
     if not posts_dir.exists():
         sys.exit(f"错误：文章目录不存在 {posts_dir}")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        posts_dir.relative_to(out_dir)
+        sys.exit("错误：--out 不能是 --posts 或其父目录，否则会清空文章源文件。")
+    except ValueError:
+        pass
+    if out_dir.exists() and not out_dir.is_dir():
+        sys.exit(f"错误：输出路径不是目录：{out_dir}")
 
     pipeline_js = extract_pipeline_js(HERE / "renderer.js")
     posts = load_posts(posts_dir)
 
-    sync_assets(posts_dir, out_dir)
+    seen_slugs: set[str] = set()
+    for post in posts:
+        if post["slug"] in seen_slugs:
+            sys.exit(f"错误：重复 slug：{post['slug']}")
+        seen_slugs.add(post["slug"])
+
+    # Build into a sibling staging directory. A successful build replaces the
+    # complete old tree, so deleted posts/assets cannot linger in production.
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.build-", dir=out_dir.parent))
+    sync_assets(posts_dir, staging)
     base_url = args.base_url.rstrip("/")
     if not base_url:
         print("⚠️  未设置 --base-url：RSS、sitemap 和 canonical 将使用相对 URL；部署前请补充。")
-    build_index(posts, out_dir, base_url)
-    build_tags(posts, out_dir, base_url)
-    build_search(posts, out_dir, base_url)
-    build_search_index(posts, out_dir)
-    build_rss(posts, out_dir, base_url)
-    build_sitemap(posts, out_dir, base_url)
+    build_index(posts, staging, base_url)
+    build_tags(posts, staging, base_url)
+    build_search(posts, staging, base_url)
+    build_search_index(posts, staging)
+    build_rss(posts, staging, base_url)
+    build_sitemap(posts, staging, base_url)
     for i, p in enumerate(posts):
-        build_post(p, pipeline_js, out_dir,
+        build_post(p, pipeline_js, staging,
                    newer=posts[i - 1] if i else None,
                    older=posts[i + 1] if i + 1 < len(posts) else None,
                    related=related_posts(p, posts), base_url=base_url)
+
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    staging.replace(out_dir)
 
     print(f"✅ 构建完成: {out_dir}")
     print(f"   文章 {len(posts)} 篇 → index.html / tags.html / search.html / rss.xml / sitemap.xml / " +

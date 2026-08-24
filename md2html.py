@@ -23,7 +23,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from frontmatter import parse_front_matter
+
 DEFAULT_RENDERER = Path(__file__).with_name("renderer.js")
+RUNTIME_ASSETS = Path(__file__).with_name("assets") / "vendor"
 
 # ---------------------------------------------------------------- reader 管线提取
 
@@ -49,12 +52,11 @@ TEMPLATE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__TITLE__</title>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
-<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/vendor/marked.min.js"></script>
+<link rel="stylesheet" href="assets/vendor/katex/katex.min.css">
+<script src="assets/vendor/katex/katex.min.js"></script>
+<link rel="stylesheet" href="assets/vendor/github-dark.min.css">
+<script src="assets/vendor/highlight.min.js"></script>
 <style>
 :root {
   --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280;
@@ -210,12 +212,8 @@ def convert(md_path: Path, out_path: Path, renderer_path: Path) -> Path:
     pipeline = extract_pipeline_js(renderer_path)
 
     # 侧栏标题：优先 Front Matter 的 title，否则用第一个 h1，否则文件名
-    fm_title = None
-    m = re.match(r"^---\r?\n[\s\S]*?\r?\n---", src)
-    if m:
-        t = re.search(r"^title:\s*(.+)$", m.group(0), re.M)
-        if t:
-            fm_title = t.group(1).strip().strip("\"'")
+    meta, _ = parse_front_matter(src)
+    fm_title = str(meta.get("title") or "") or None
     h1 = re.search(r"^#\s+(.+)$", src, re.M)
     title = fm_title or (h1.group(1).strip() if h1 else md_path.stem)
     sub = f"{md_path.name} · 导出于 {date.today().isoformat()}"
@@ -227,6 +225,11 @@ def convert(md_path: Path, out_path: Path, renderer_path: Path) -> Path:
             .replace("__PIPELINE_JS__", pipeline)
             .replace("__SRC_JSON__", json_for_script(src)))
     out_path.write_text(html, encoding="utf-8")
+    if not RUNTIME_ASSETS.is_dir():
+        sys.exit(f"错误：找不到离线渲染资源 {RUNTIME_ASSETS}")
+    destination = out_path.parent / "assets" / "vendor"
+    import shutil
+    shutil.copytree(RUNTIME_ASSETS, destination, dirs_exist_ok=True)
     return out_path
 
 
@@ -248,6 +251,10 @@ def main() -> None:
 
     out_path = (Path(args.output).expanduser().resolve() if args.output
                 else md_path.with_suffix(".html"))
+    if out_path == md_path:
+        sys.exit("错误：输出路径不能覆盖输入 Markdown 文件。")
+    if out_path.suffix.lower() != ".html":
+        sys.exit("错误：输出文件应使用 .html 后缀。")
     convert(md_path, out_path, renderer_path)
     print(f"✅ 已生成: {out_path}  ({out_path.stat().st_size:,} bytes)")
 

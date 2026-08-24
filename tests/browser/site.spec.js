@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 test('generated site search and article navigation work', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/site/index.html');
   const input = page.locator('#site-search');
   await input.fill('傅里叶');
   await expect(page.locator('#search-results a')).toContainText('傅里叶级数');

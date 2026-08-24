@@ -1,6 +1,6 @@
 # Enhanced Markdown Reader（增强 Markdown 阅读器）
 
-一个单文件、零构建的 Markdown 阅读器，专为**数学文档**设计：完整支持 KaTeX 数学环境、AMSL 定理环境和 LaTeX 风格的交叉引用。
+一个零构建、可离线运行的 Markdown 阅读器，专为**数学文档**设计：完整支持 KaTeX 数学环境、AMSL 定理环境和 LaTeX 风格的交叉引用。
 
 参考了 Typora / Obsidian / GitHub 等主流方案的技术路线（marked + KaTeX），并在其基础上做了数学感知的解析管线增强。附带 Python 导出器，可将文档转换为带左侧目录的单文件 HTML。
 
@@ -46,9 +46,9 @@ uv run python server.py --watch              # 监视文章与渲染器改动，
 
 也可以把 `.md` 文件直接拖进窗口。
 
-## 📤 导出为单文件 HTML（左侧目录）
+## 📤 导出为离线 HTML（左侧目录）
 
-`md2html.py` 可以把增强 Markdown 转换为**单个独立 HTML 文件**——目录渲染在左侧固定侧边栏，右侧为正文，滚动时侧栏保持可见：
+`md2html.py` 可以把增强 Markdown 转换为离线 HTML 页面——目录渲染在左侧固定侧边栏，右侧为正文，滚动时侧栏保持可见。为保证离线渲染，导出时会在输出文件旁复制 `assets/vendor/` 运行时资源：
 
 ```bash
 # 基本用法（输出同名 .html）
@@ -67,7 +67,7 @@ uv run python md2html.py notes.md --renderer /path/to/renderer.js
 - **左侧目录侧栏** —— 自动收集 h2/h3 生成可点击目录（h3 缩进一级）；窄屏（<900px）自动折叠为顶部块；打印时隐藏
 - **侧栏开关** —— Front Matter 中 `toc: false` 可隐藏侧栏（默认显示）
 - **深色模式** —— 与阅读器一致，跟随系统设置
-- **零依赖** —— 只需 Python 3 标准库；KaTeX/marked/highlight.js 走 CDN，联网即可渲染
+- **离线可用** —— KaTeX、marked、highlight.js 固定在仓库的 `assets/vendor/`；导出页会自动复制这些资源，不依赖 CDN
 - **输入保护** —— 仅接受 `.md` / `.markdown` / `.txt` 输入，防止误覆盖其他文件
 
 侧栏标题的取值优先级：Front Matter `title` → 文档第一个 `# h1` → 文件名。
@@ -120,7 +120,7 @@ draft: true                # 草稿：不发布
 
 ### 发布与写作增强
 
-构建器还会生成 `search.html`、`search-index.json`、`rss.xml` 和 `sitemap.xml`。首页与搜索页均可按标题、标签和摘要检索；文章页包含相邻文章与同标签相关文章。
+构建器还会生成 `search.html`、`search-index.json`、`rss.xml` 和 `sitemap.xml`。首页与搜索页均可按标题、标签和摘要检索；文章页包含相邻文章与同标签相关文章。每次构建先写入临时目录，成功后完整替换旧 `site/`，不会残留已删除文章。
 
 - 在 `content/assets/` 放本地资源；文章用 `![](assets/figure.png)` 引用，构建时自动复制到 `site/assets/`。
 - 文内相对文章链接会由 `[下一篇](next.md)` 自动改为 `next.html`。
@@ -140,6 +140,10 @@ series: 泛函分析入门
 slug: custom-url
 ---
 ```
+
+`slug` 必须是单个文件名（不能包含 `/`、`..` 或 `.html` 后缀），同一站点内不可重复；`date` 与 `updated` 必须是 `YYYY-MM-DD`。Front Matter 支持标量、行内列表和短横线列表；该格式由 Python 构建器与浏览器渲染器共同遵循。
+
+为保护从外部获得的文章，Markdown 链接和图片仅允许普通相对路径、锚点、`http(s)` 与 `mailto`；博客封面仅允许站点内相对路径或 `http(s)` URL。
 
 仓库包含 [GitHub Pages 工作流](.github/workflows/pages.yml)：将默认分支设为 `main`、在仓库设置中启用 GitHub Pages 后，推送会先运行测试、构建 `site/`，再部署页面。
 
