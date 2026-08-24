@@ -1,0 +1,11 @@
+# macOS Finder metadata
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Node and Playwright local artifacts
+node_modules/
+test-results/
+playwright-report/
