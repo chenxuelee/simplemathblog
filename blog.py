@@ -63,6 +63,18 @@ def rewrite_local_links(text: str) -> str:
                   lambda m: f"{m.group(1)}{m.group(2)}.html{m.group(3) or ''}{m.group(4)}", text)
 
 
+def rewrite_article_citations(text: str, posts: list[Post]) -> str:
+    """Turn [[slug]] into a portable Markdown recommendation card."""
+    by_slug = {post["slug"]: post for post in posts}
+    def replace(match: re.Match[str]) -> str:
+        slug = match.group(1).strip()
+        post = by_slug.get(slug)
+        if not post:
+            return f"**[未找到文章：{slug}]**"
+        return f"\n\n> **推荐阅读 · [{post['title']}]({post['slug']}.html)**\n>\n> {post['excerpt']}\n\n"
+    return re.sub(r"\[\[([^\]]+)\]\]", replace, text)
+
+
 def absolute_url(path: str, base_url: str = "") -> str:
     """为 RSS、sitemap 与 meta 标签生成规范 URL。"""
     encoded = quote(path.lstrip("/"), safe="/%#?=&")
@@ -170,6 +182,8 @@ header.site nav a:hover { color:var(--accent); background:var(--accent-soft); }
 .post-nav a { max-width:48%; }
 .cover { width:100%; max-height:360px; object-fit:cover; border-radius:12px; margin:0 0 1.4em; }
 img.zoomable { cursor:zoom-in; }
+.illustration { margin:1.9em 0; padding:10px; border:1px solid var(--border); border-radius:16px; background:var(--card); }
+.illustration img { display:block; width:100%; border-radius:10px; } .illustration figcaption { color:var(--muted); font-size:.88em; text-align:center; padding:10px 6px 2px; }
 .image-lightbox { position:fixed; inset:0; z-index:30; display:grid; place-items:center;
   padding:30px; background:rgba(0,0,0,.8); cursor:zoom-out; }
 .image-lightbox img { max-width:100%; max-height:100%; object-fit:contain; }
@@ -188,6 +202,8 @@ img.zoomable { cursor:zoom-in; }
 .tag:hover { background:var(--accent); color:#fff; }
 .tagcloud { max-width:760px; margin:28px auto; padding:24px; border:1px solid var(--border); border-radius:16px; background:rgba(255,255,255,.65); }
 .tagcloud h3 { font-size:.95em; color:var(--muted); }
+.cite-link { font-size:.82em; font-weight:700; margin:0 .08em; } .citation-missing { color:#dc2626; font-size:.86em; }
+.bibliography { margin-top:3.4em; padding-top:1.5em; border-top:2px solid var(--border); } .bibliography ol { padding-left:1.6em; } .bibliography li { margin:.65em 0; padding-left:.3em; line-height:1.7; } .ref-number { color:var(--accent); font-weight:700; }
 .toc-active { color:var(--accent) !important; font-weight:700; background:var(--bg); }
 .copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
 pre { position:relative; display:block; } pre > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
@@ -343,11 +359,13 @@ const COVER_HTML = __COVER_HTML__;
 
 (function renderPost(src) {
   thmStore = []; crefStore = [];
+  bibEntries = parseBibtex(""); citationOrder = [];
   for (const k in counters) delete counters[k];
   const { meta, body } = parseFrontMatter(src);
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(preprocessMarkdown(body));
+  let s = extractTheorems(extractBibtexBlocks(preprocessMarkdown(body)));
   s = processCrossrefs(s);
+  s = processCitations(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
   html = restoreMath(html);
@@ -357,6 +375,8 @@ const COVER_HTML = __COVER_HTML__;
   if (COVER_HTML) container.insertAdjacentHTML("afterbegin", COVER_HTML);
   renderBareEnvironments();
   resolveCrossrefs(container);
+  renderCitations(container);
+  renderBibliography(container);
   enhanceImages(container);
   enhanceCopyButtons(container);
   // 左侧目录（toc:false 关闭）
@@ -503,7 +523,8 @@ def build_tags(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
 
 def build_post(p: Post, pipeline_js: str, out_dir: Path, newer: Post | None = None,
                older: Post | None = None, related: tuple[Post, ...] | list[Post] = (),
-               base_url: str = "", position: int = 1, total: int = 1) -> None:
+               base_url: str = "", position: int = 1, total: int = 1,
+               all_posts: list[Post] | None = None) -> None:
     sub = f"{p['date']}"
     cover = f'<img class="cover" src="{esc(p["cover"])}" alt="{esc(p["title"])}">' if p["cover"] else ""
     nav = '<nav class="post-nav">' + (f'<a href="{esc(newer["slug"])}.html">← 更新文章</a>' if newer else '<span></span>') + f'<span>第 {position} / {total} 篇</span>' + (f'<a href="{esc(older["slug"])}.html">更早文章 →</a>' if older else '<span></span>') + '</nav>'
@@ -526,7 +547,7 @@ def build_post(p: Post, pipeline_js: str, out_dir: Path, newer: Post | None = No
             .replace("__CDN__", CDN_AND_PIPELINE)
             .replace("__PIPELINE__", pipeline_js)
             .replace("__COVER_HTML__", json_for_script(cover))
-            .replace("__SRC_JSON__", json_for_script(p["body"])))
+            .replace("__SRC_JSON__", json_for_script(rewrite_article_citations(p["body"], all_posts or [p]))))
     (out_dir / f"{p['slug']}.html").write_text(html, encoding="utf-8")
 
 
@@ -576,7 +597,7 @@ def main() -> None:
                    newer=posts[i - 1] if i else None,
                    older=posts[i + 1] if i + 1 < len(posts) else None,
                    related=related_posts(p, posts), base_url=base_url,
-                   position=i + 1, total=len(posts))
+                   position=i + 1, total=len(posts), all_posts=posts)
 
     if out_dir.exists():
         shutil.rmtree(out_dir)

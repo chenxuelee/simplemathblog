@@ -113,6 +113,8 @@ th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 th { background: var(--card); }
 tr:nth-child(even) td { background: var(--card); }
 img { max-width: 100%; }
+.illustration { margin:1.9em 0; padding:10px; border:1px solid var(--border); border-radius:16px; background:var(--card); }
+.illustration img { display:block; width:100%; border-radius:10px; } .illustration figcaption { color:var(--muted); font-size:.88em; text-align:center; padding:10px 6px 2px; }
 img.zoomable { cursor: zoom-in; }
 .image-lightbox { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
   padding: 30px; background: rgba(0,0,0,.82); cursor: zoom-out; }
@@ -142,6 +144,8 @@ a.ref-link { color: var(--accent); text-decoration: none;
 .fm-tag { background: var(--accent); color: #fff; opacity: .85;
   border-radius: 999px; padding: .05em .7em; font-size: .82em; }
 .cover { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; margin-top: 1em; }
+.cite-link { font-size:.82em; font-weight:700; margin:0 .08em; } .citation-missing { color:#dc2626; font-size:.86em; }
+.bibliography { margin-top:3.4em; padding-top:1.5em; border-top:2px solid var(--border); } .bibliography ol { padding-left:1.6em; } .bibliography li { margin:.65em 0; padding-left:.3em; line-height:1.7; } .ref-number { color:var(--accent); font-weight:700; }
 .copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
 pre { position:relative; display:block; } pre > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
 
@@ -170,11 +174,13 @@ const SRC = __SRC_JSON__;
 
 function renderExport(src) {
   thmStore = []; crefStore = [];
+  bibEntries = parseBibtex(""); citationOrder = [];
   for (const k in counters) delete counters[k];
   const { meta, body } = parseFrontMatter(src);
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(preprocessMarkdown(body));
+  let s = extractTheorems(extractBibtexBlocks(preprocessMarkdown(body)));
   s = processCrossrefs(s);
+  s = processCitations(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
   html = restoreMath(html);
@@ -183,6 +189,8 @@ function renderExport(src) {
   container.innerHTML = html;
   renderBareEnvironments();
   resolveCrossrefs(container);
+  renderCitations(container);
+  renderBibliography(container);
   enhanceImages(container);
   enhanceCopyButtons(container);
   buildSidebarToc(meta);

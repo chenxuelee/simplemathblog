@@ -9,13 +9,15 @@
 - **完整数学环境支持** —— `$...$`、`$$...$$`、`\(...\)`、`\[...\]` 四种定界符，以及不包 `$` 直接书写的裸 `\begin{align}` 等环境
 - **AMSL 定理环境** —— `theorem`、`lemma`、`proposition`、`corollary` 等 9 种环境，自动编号、样式化渲染
 - **交叉引用（crossref）** —— `\label` / `\ref` / `\eqref` / `\autoref`，引用渲染为可点击链接
+- **BibTeX 文献管理** —— 导入 `.bib` 文件或内嵌 `bibtex` 代码块；支持 `\cite{key}`、`[@key]` 与自动参考文献
 - **Front Matter** —— YAML 元数据块渲染为标题卡片（作者/日期/标签），支持自动目录
 - **单文件 HTML 导出** —— 附带 `md2html.py`，一键转换为带左侧目录侧栏的独立 HTML
 - **静态博客系统** —— 附带 `blog.py`，`content/` 目录一键生成完整站点（首页 / 标签归档 / 文章页）
+- **文章引用与插图** —— `[[slug]]` 生成推荐阅读卡片；带标题的 Markdown 图片自动成为可放大的带图注插图
 - **共享渲染管线** —— `renderer.js` 被阅读器直接加载，并由两种导出路径内联，三处渲染逻辑保持同源
 - **自定义宏** —— 内置 `\RR`、`\norm` 等常用宏，可自行扩展
 - **阅读体验** —— GFM 表格与任务列表、代码高亮、深色模式自适应、长公式横向滚动
-- **高效检索与摘录** —— 目录随滚动高亮、阅读器正文搜索、博客全文搜索；一键复制公式 TeX 或代码块
+- **高效检索与摘录** —— 目录随滚动高亮、阅读器正文搜索、博客全文搜索；一键复制代码块
 - **发布能力** —— 文章页显示前后分页与篇次，RSS 提供分类、作者、更新时间和自链接元数据
 - **使用方式** —— 打开本地 `.md` 文件、拖拽进窗口、或直接在编辑器中书写实时预览；一键导出 PDF
 
@@ -45,6 +47,7 @@ uv run python server.py --watch              # 监视文章与渲染器改动，
 | ✏️ 编辑源码 | 在源码编辑与渲染预览之间切换，编辑时实时渲染 |
 | 🖨️ 导出 PDF | 调用浏览器打印功能 |
 | ↔ 宽度 / A 字号 | 切换阅读宽度与字号（记住本机设置） |
+| 📚 导入 BibTeX | 加载本地 `.bib` 文献库，供当前阅读器会话引用 |
 
 也可以把 `.md` 文件直接拖进窗口。
 
@@ -99,7 +102,7 @@ content/*.md  ──blog.py──▶  site/
 | 归档页 | 按标签分组的文章列表；标签云点击直达对应分组锚点 |
 | 文章页 | Front Matter 元数据卡片 + 左侧 sticky 目录侧栏（h2/h3 两级缩进） |
 
-文章页内嵌阅读器的 JS 渲染管线，**数学环境、定理环境、交叉引用、Front Matter 全部支持**，渲染效果与阅读器预览一致。
+文章页内嵌阅读器的 JS 渲染管线，**数学环境、定理环境、交叉引用、BibTeX、Front Matter 全部支持**，渲染效果与阅读器预览一致。
 
 ### 文章 Front Matter 字段
 
@@ -125,6 +128,8 @@ draft: true                # 草稿：不发布
 构建器还会生成 `search.html`、`search-index.json`、`rss.xml` 和 `sitemap.xml`。首页与搜索页均可按标题、标签和摘要检索；文章页包含相邻文章与同标签相关文章。每次构建先写入临时目录，成功后完整替换旧 `site/`，不会残留已删除文章。
 
 - 在 `content/assets/` 放本地资源；文章用 `![](assets/figure.png)` 引用，构建时自动复制到 `site/assets/`。
+- 用 `[[other-post]]` 引用同一博客中的其他文章；构建后会显示标题、摘要和跳转链接。`other-post` 是目标文章的 `slug`。
+- 图片可写为 `![替代文字](assets/figure.svg "图 1：图注")`；构建后自动生成带图注的插图卡片，点击图片可放大查看。
 - 文内相对文章链接会由 `[下一篇](next.md)` 自动改为 `next.html`。
 - 支持 `cover`、`description`、`updated`、`series`、`slug` 等 Front Matter 字段；其中 `cover` 同时生成文章头图和 Open Graph 图片元数据。
 - `:::note`、`:::tip`、`:::warning` 块会被渲染为提示引用块；文章图片支持点击放大。
@@ -282,6 +287,30 @@ LaTeX 用户熟悉的引用系统完整移植：
 - 每个含 `\label` 的公式独立编号，从 1 开始
 - 编号在每次重新渲染时重算，编辑实时预览时始终准确
 
+## 📚 新语法：BibTeX 引用与参考文献
+
+阅读器支持两种引用写法，都会渲染成按首次出现顺序编号的可点击链接：
+
+```markdown
+经典结果参见 \cite{duoandikoetxea2001}。
+也支持 Pandoc 风格的 [@duoandikoetxea2001]。
+```
+
+文献库可以通过工具栏的“📚 导入 BibTeX”按钮加载本地 `.bib` 文件，也可以写在文章内的 `bibtex` 代码块中。后者适合博客和离线导出，因为文献会随 Markdown 一起发布：
+
+````markdown
+```bibtex
+@book{duoandikoetxea2001,
+  author = {Javier Duoandikoetxea},
+  title = {Fourier Analysis},
+  publisher = {American Mathematical Society},
+  year = {2001}
+}
+```
+````
+
+渲染时 `bibtex` 代码块不会显示，页面末尾会自动生成“参考文献”列表。当前支持常见的 `article`、`book`、`inproceedings` 等条目以及 `author`、`title`、`journal`、`booktitle`、`publisher`、`year` 字段；未找到的 key 会显示红色提示。
+
 ## 🧮 内置宏
 
 可在源码顶部的 `MACROS` 对象中扩展：
@@ -294,7 +323,7 @@ LaTeX 用户熟悉的引用系统完整移植：
 
 ## ⚙️ 技术实现
 
-单 HTML 文件，依赖通过 CDN 加载：
+浏览器运行时资源固定在仓库的 `assets/vendor/`，无需 CDN：
 
 - [marked](https://github.com/markedjs/marked) — Markdown 解析
 - [KaTeX](https://katex.org/) — 数学渲染（速度快、覆盖绝大多数 LaTeX 环境）
@@ -305,13 +334,13 @@ LaTeX 用户熟悉的引用系统完整移植：
 ```
 源文本
  │
- ├─ ① 提取定理环境 → 占位符（防止 Markdown 破坏内部语法）
- ├─ ② 处理 \label → 登记编号；\ref/\eqref/\autoref → 占位符
+ ├─ ① 提取定理与内嵌 BibTeX → 占位符/文献表
+ ├─ ② 处理 \label 与 \cite → 编号占位符
  ├─ ③ 保护数学区域（$...$、$$...$$、\(...\)、\[...\]）→ 占位符
- ├─ ④ marked 解析剩余 Markdown
+ ├─ ④ marked 解析剩余 Markdown，并由 highlight.js 高亮代码块
  ├─ ⑤ KaTeX 渲染占位的公式（含宏展开）
- ├─ ⑥ 回填定理块（内部再做一遍数学+引用处理）
- └─ ⑦ 回填交叉引用 → 可点击链接
+ ├─ ⑥ 回填定理、交叉引用与 BibTeX 引用
+ └─ ⑦ 追加自动生成的参考文献列表
 ```
 
 关键设计点：
@@ -325,8 +354,10 @@ LaTeX 用户熟悉的引用系统完整移植：
 ```
 md-reader/
 ├── index.html    # 阅读器（HTML + CSS + JS 单文件）
-├── md2html.py    # 导出器：增强 Markdown → 单文件 HTML（左侧目录）
+├── renderer.js    # 共享渲染管线：数学、定理、引用、BibTeX、代码高亮
+├── md2html.py    # 导出器：增强 Markdown → 离线 HTML（左侧目录）
 ├── blog.py       # 静态博客系统：content/ → site/（首页/归档/文章页）
+├── assets/vendor/ # 固定版本的 marked、KaTeX、highlight.js 运行时资源
 ├── content/      # 博客文章目录（.md，含示例文章）
 └── README.md     # 本文件
 ```
@@ -335,8 +366,8 @@ md-reader/
 
 - [ ] 按章节编号（Theorem 2.1）
 - [ ] 英文界面切换
-- [ ] 侧栏目录滚动高亮当前章节
-- [ ] 博客：RSS/Atom 订阅、归档按年份分组
+- [ ] BibTeX 的 CSL 引用样式与更多嵌套字段
+- [ ] 博客：归档按年份分组
 - [ ] 导出时内联 KaTeX 字体实现完全离线
 
 ---

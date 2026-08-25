@@ -49,6 +49,8 @@ th { background: var(--card); }
 tr:nth-child(even) td { background: var(--card); }
 img { max-width: 100%; }
 .cover { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; margin-top: 1em; }
+.illustration { margin:1.9em 0; padding:10px; border:1px solid var(--border); border-radius:16px; background:var(--card); }
+.illustration img { display:block; width:100%; border-radius:10px; } .illustration figcaption { color:var(--muted); font-size:.88em; text-align:center; padding:10px 6px 2px; }
 img.zoomable { cursor: zoom-in; }
 .image-lightbox { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
   padding: 30px; background: rgba(0,0,0,.82); cursor: zoom-out; }
@@ -87,6 +89,8 @@ a.ref-link { color: var(--accent); text-decoration: none; border-bottom: 1px dot
 .toc-box a { text-decoration: none; }
 .toc-active { color:var(--accent) !important; font-weight:700; background:var(--card); }
 .search-hit { background:rgba(79,70,229,.14); outline:1px solid var(--accent); border-radius:4px; }
+.cite-link { font-size:.82em; font-weight:700; margin:0 .08em; } .citation-missing { color:#dc2626; font-size:.86em; }
+.bibliography { margin-top:3.4em; padding-top:1.5em; border-top:2px solid var(--border); } .bibliography ol { padding-left:1.6em; } .bibliography li { margin:.65em 0; padding-left:.3em; line-height:1.7; } .ref-number { color:var(--accent); font-weight:700; }
 .copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
 pre { position:relative; display:block; }
 pre > .copy-button { position:absolute; top:7px; right:7px; z-index:1; }
@@ -100,9 +104,11 @@ pre > .copy-button { position:absolute; top:7px; right:7px; z-index:1; }
   <button id="btn-print">🖨️ 导出 PDF</button>
   <button id="btn-width" title="切换宽版排版">↔ 宽度</button>
   <button id="btn-size" title="切换大字号">A 字号</button>
+  <button id="btn-bib">📚 导入 BibTeX</button>
   <input id="reader-search" type="search" placeholder="搜索正文…">
   <span class="spacer"></span>
   <input type="file" id="file-input" accept=".md,.markdown,.txt,.tex">
+  <input type="file" id="bib-input" accept=".bib" style="display:none">
   <span id="status">内置演示文档 · 支持拖拽 .md 文件进窗口</span>
 </div>
 <div class="reading-progress" id="reading-progress"></div>
@@ -245,6 +251,13 @@ document.getElementById("btn-edit").onclick = function () {
   else { editor.style.display = "block"; container.style.display = "none"; this.textContent = "👁️ 预览"; editor.value = editor.value || currentSrc; }
 };
 document.getElementById("btn-print").onclick = () => window.print();
+document.getElementById("btn-bib").onclick = () => document.getElementById("bib-input").click();
+document.getElementById("bib-input").onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { setBibtexSource(reader.result); render(editor.value || currentSrc); statusEl.textContent = `已导入 BibTeX：${file.name}`; };
+  reader.readAsText(file);
+};
 function toggleReadingClass(name) {
   document.body.classList.toggle(name);
   localStorage.setItem(name, document.body.classList.contains(name) ? "1" : "0");

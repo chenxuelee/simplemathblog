@@ -5,6 +5,9 @@
 
 const PLACEHOLDER_PREFIX = "\u0000MATH";
 let mathStore = [];
+let externalBibtex = "";
+let bibEntries = {};
+let citationOrder = [];
 
 function protectMath(src) {
   mathStore = [];
@@ -173,6 +176,56 @@ function safeUrl(value) {
   return /^[a-z][a-z0-9+.-]*:/i.test(url) ? "" : url; // ordinary relative path
 }
 
+// ============ BibTeX citations ============
+// Supports a practical BibTeX subset (article/book/inproceedings etc.) and
+// keeps citations portable: a fenced `bibtex` block can travel with a note.
+function setBibtexSource(source) { externalBibtex = String(source || ""); }
+function parseBibtex(source) {
+  const entries = {};
+  const entryRe = /@(\w+)\s*\{\s*([^,\s]+)\s*,([\s\S]*?)^\s*\}/gm;
+  let match;
+  while ((match = entryRe.exec(source))) {
+    const fields = { type: match[1].toLowerCase(), key: match[2].trim() };
+    const fieldRe = /(\w+)\s*=\s*(?:\{([^{}]*)\}|"([^"]*)"|([^,\n]+))\s*,?/g;
+    let field;
+    while ((field = fieldRe.exec(match[3]))) fields[field[1].toLowerCase()] = (field[2] ?? field[3] ?? field[4] ?? "").trim();
+    entries[fields.key] = fields;
+  }
+  return entries;
+}
+function extractBibtexBlocks(src) {
+  return src.replace(/^```bibtex\s*\n([\s\S]*?)^```\s*$/gmi, (_, bib) => {
+    Object.assign(bibEntries, parseBibtex(bib)); return "";
+  });
+}
+function processCitations(src) {
+  return src.replace(/\\cite\{([^}]+)\}|\[@([^\]]+)\]/g, (_, latexKeys, markdownKeys) => {
+    const keys = (latexKeys || markdownKeys).split(",").map(k => k.trim()).filter(Boolean);
+    return keys.map(key => {
+      if (!citationOrder.includes(key)) citationOrder.push(key);
+      return `CITEZ${citationOrder.indexOf(key)}ENDCITE`;
+    }).join(", ");
+  });
+}
+function renderCitations(root) {
+  root.innerHTML = root.innerHTML.replace(/CITEZ(\d+)ENDCITE/g, (_, index) => {
+    const key = citationOrder[+index];
+    return bibEntries[key] ? `<a class="cite-link" href="#ref-${esc(key)}">[${+index + 1}]</a>` : `<span class="citation-missing">[? ${esc(key)}]</span>`;
+  });
+}
+function bibliographyText(entry) {
+  const author = entry.author || "Unknown author";
+  const title = entry.title || entry.key;
+  const venue = entry.journal || entry.booktitle || entry.publisher || "";
+  return [author, `“${title}.”`, venue, entry.year].filter(Boolean).join(" ");
+}
+function renderBibliography(root) {
+  const cited = citationOrder.filter(key => bibEntries[key]);
+  if (!cited.length) return;
+  const items = cited.map((key, index) => `<li id="ref-${esc(key)}"><span class="ref-number">[${index + 1}]</span> ${esc(bibliographyText(bibEntries[key]))}</li>`).join("");
+  root.insertAdjacentHTML("beforeend", `<section class="bibliography"><h2>参考文献</h2><ol>${items}</ol></section>`);
+}
+
 // ============ 交叉引用 ============
 // 处理 \ref{...}, \eqref{...}, \autoref{...} —— 在公式渲染前替换为占位，
 // 公式渲染后回填为链接。同时处理公式内的 \label -> 自动 \tag。
@@ -219,7 +272,7 @@ markdownRenderer.link = (href, title, text) => {
 };
 markdownRenderer.image = (href, title, text) => {
   const safe = safeUrl(href);
-  return safe ? `<img src="${esc(safe)}" alt="${esc(text || "")}"${title ? ` title="${esc(title)}"` : ""}>` : esc(text || "");
+  return safe ? `<img src="${esc(safe)}" alt="${esc(text || "")}"${title ? ` data-caption="${esc(title)}"` : ""}>` : esc(text || "");
 };
 markdownRenderer.code = (code, infostring) => {
   // marked v12 calls renderers with a token object; older supported versions
@@ -313,6 +366,18 @@ function enhanceImages(root) {
       overlay.append(full); overlay.onclick = () => overlay.remove();
       document.body.append(overlay);
     };
+    const caption = img.dataset.caption;
+    if (caption && !img.closest("figure")) {
+      const figure = document.createElement("figure");
+      figure.className = "illustration";
+      const parent = img.parentElement;
+      if (parent?.tagName === "P" && parent.childNodes.length === 1) parent.replaceWith(figure);
+      else img.before(figure);
+      figure.append(img);
+      const figcaption = document.createElement("figcaption");
+      figcaption.textContent = caption;
+      figure.append(figcaption);
+    }
   });
 }
 
@@ -371,14 +436,16 @@ function buildToc(container, insertBeforeEl) {
 
 function render(src) {
   thmStore = []; crefStore = [];
+  bibEntries = parseBibtex(externalBibtex); citationOrder = [];
   for (const k in counters) delete counters[k];
   // 0) Front Matter：剥离元数据，正文进入管线
   const { meta, body } = parseFrontMatter(src);
   if (meta && meta.title) document.title = meta.title + " · MD Reader";
   else document.title = "Enhanced Markdown Reader";
   // 管线顺序：定理提取 → 交叉引用占位 → 数学保护 → marked 解析
-  let s = extractTheorems(preprocessMarkdown(body));
+  let s = extractTheorems(extractBibtexBlocks(preprocessMarkdown(body)));
   s = processCrossrefs(s);
+  s = processCitations(s);
   const stashed = protectMath(s);
   let html = marked.parse(stashed);
   html = restoreMath(html);
@@ -392,6 +459,8 @@ function render(src) {
   }
   renderBareEnvironments();
   resolveCrossrefs(container);
+  renderCitations(container);
+  renderBibliography(container);
   enhanceImages(container);
   enhanceCopyButtons(container);
 }

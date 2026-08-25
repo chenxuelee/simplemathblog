@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from blog import absolute_url, load_posts, main as build_site, rss_date
+from blog import absolute_url, load_posts, main as build_site, rewrite_article_citations, rss_date
 from md2html import json_for_script
 from server import source_snapshot
 
@@ -20,6 +20,12 @@ class BlogBuildTests(unittest.TestCase):
             (posts / "one.md").write_text("[next](two.md#part)", encoding="utf-8")
             item = load_posts(posts)[0]
             self.assertIn("two.html#part", item["body"])
+
+    def test_article_citation_expands_to_recommendation_card(self):
+        posts = [{"slug": "next", "title": "Next", "excerpt": "A summary"}]
+        rendered = rewrite_article_citations("See [[next]].", posts)  # type: ignore[arg-type]
+        self.assertIn("[Next](next.html)", rendered)
+        self.assertIn("A summary", rendered)
 
     def test_production_url_helpers(self):
         self.assertEqual(absolute_url("文章.html", "https://example.com/"), "https://example.com/%E6%96%87%E7%AB%A0.html")

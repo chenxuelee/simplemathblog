@@ -8,13 +8,15 @@ test('reader renders math, theorem, cross-reference, and callout', async ({ page
 
   await page.locator('#btn-edit').click();
   const editor = page.locator('#editor');
-  await editor.fill(':::tip 浏览器测试\n提示内容\n:::\n\n$E=mc^2$\n\n```javascript\nconst answer = 42;\n```');
+  await editor.fill(':::tip 浏览器测试\n提示内容\n:::\n\n$E=mc^2$，参见 \\cite{knuth84}。\n\n```javascript\nconst answer = 42;\n```\n\n```bibtex\n@book{knuth84,\n  author = {Donald Knuth},\n  title = {The TeXbook},\n  year = {1984}\n}\n```');
   await page.locator('#btn-edit').click();
   await expect(page.locator('blockquote')).toContainText('提示：浏览器测试');
   await expect(page.locator('.katex')).toBeVisible();
   await expect(page.locator('.math-copy-target')).toHaveCount(0);
   await expect(page.locator('pre code.hljs.language-javascript')).toContainText('const answer');
   await expect(page.locator('pre .copy-button')).toHaveText('复制代码');
+  await expect(page.locator('.cite-link')).toHaveText('[1]');
+  await expect(page.locator('.bibliography')).toContainText('The TeXbook');
 
   await page.locator('#btn-edit').click();
   await editor.fill('[unsafe](javascript:alert(1))');

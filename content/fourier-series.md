@@ -30,4 +30,19 @@ $$ D = \left( e^{ikx_j} \right)_{k,j=1}^{N} = \begin{pmatrix} 1 & 1 & 1 \\ 1 & \
 
 其中 $\omega = e^{-2\pi i/N}$。
 
+![单位圆上的傅里叶模态](assets/fourier-circle.svg "图 1：复指数 Fourier 模态与单位圆")
+
+经典的收敛性论述可参见 \cite{duoandikoetxea2001}；这里用它作为文内引用与自动参考文献生成的测试样例。
+
+延伸阅读：[[banach-fixed-point]]
+
+```bibtex
+@book{duoandikoetxea2001,
+  author = {Javier Duoandikoetxea},
+  title = {Fourier Analysis},
+  publisher = {American Mathematical Society},
+  year = {2001}
+}
+```
+
 > 更多内容见「Banach 不动点」一文。
