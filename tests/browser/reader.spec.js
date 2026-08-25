@@ -12,7 +12,7 @@ test('reader renders math, theorem, cross-reference, and callout', async ({ page
   await page.locator('#btn-edit').click();
   await expect(page.locator('blockquote')).toContainText('提示：浏览器测试');
   await expect(page.locator('.katex')).toBeVisible();
-  await expect(page.locator('.math-copy-target .copy-button').first()).toHaveText('复制公式');
+  await expect(page.locator('.math-copy-target')).toHaveCount(0);
   await expect(page.locator('pre code.hljs.language-javascript')).toContainText('const answer');
   await expect(page.locator('pre .copy-button')).toHaveText('复制代码');
 

@@ -71,7 +71,7 @@ function restoreMath(html) {
         trust: false,
         macros: MACROS,
       }).replace("katex-display", m.display ? "katex-display eq-block" : "katex");
-      return `<span class="math-copy-target" data-tex="${esc(m.tex)}">${rendered}</span>`;
+      return rendered;
     } catch (e) {
       return `<span class="math-error">${m.tex.replace(/</g,"&lt;")} — ${e.message}</span>`;
     }
@@ -335,13 +335,6 @@ function enhanceCopyButtons(root) {
     button.className = "copy-button"; button.type = "button"; button.textContent = "复制代码";
     button.onclick = () => copyText(pre.querySelector("code")?.textContent || "", button);
     pre.append(button);
-  });
-  root.querySelectorAll(".math-copy-target").forEach(target => {
-    if (target.querySelector(":scope > .copy-button")) return;
-    const button = document.createElement("button");
-    button.className = "copy-button math-copy-button"; button.type = "button"; button.textContent = "复制公式";
-    button.onclick = () => copyText(target.dataset.tex || "", button);
-    target.append(button);
   });
 }
 

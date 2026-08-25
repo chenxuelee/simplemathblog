@@ -143,7 +143,7 @@ a.ref-link { color: var(--accent); text-decoration: none;
   border-radius: 999px; padding: .05em .7em; font-size: .82em; }
 .cover { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; margin-top: 1em; }
 .copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
-pre,.math-copy-target { position:relative; display:block; } pre > .copy-button,.math-copy-target > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
+pre { position:relative; display:block; } pre > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
 
 @media print {
   #sidebar { display: none; }
