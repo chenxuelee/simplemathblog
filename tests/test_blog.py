@@ -58,6 +58,9 @@ class BlogBuildTests(unittest.TestCase):
             self.assertEqual([p["title"] for p in data], ["A", "B"])
             self.assertIn("a.html", (output / "b.html").read_text(encoding="utf-8"))
             self.assertIn("https://example.test/blog/a.html", (output / "sitemap.xml").read_text(encoding="utf-8"))
+            rss = (output / "rss.xml").read_text(encoding="utf-8")
+            self.assertIn("<language>zh-CN</language>", rss)
+            self.assertIn("<category>math</category>", rss)
 
     def test_rejects_unsafe_slugs_and_bad_dates(self):
         with tempfile.TemporaryDirectory() as tmp:

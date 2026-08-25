@@ -55,6 +55,9 @@ img.zoomable { cursor:zoom-in; }
   border-radius:999px; padding:.05em .7em; font-size:.78em; margin-right:.4em; }
 .tagcloud { max-width:760px; margin:28px auto; padding-bottom:60px; }
 .tagcloud h3 { font-size:.95em; color:var(--muted); }
+.toc-active { color:var(--accent) !important; font-weight:700; background:var(--bg); }
+.copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
+pre,.math-copy-target { position:relative; display:block; } pre > .copy-button,.math-copy-target > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
 
 /* 文章布局：左侧目录 */
 #layout { display:flex; align-items:flex-start; }
@@ -128,7 +131,7 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
   <nav><a href="index.html">首页</a><a href="tags.html">归档</a><a href="search.html" style="color:var(--accent);font-weight:600">搜索</a></nav>
 </div></header>
 <div class="wrap"><div class="search-box"><h1>搜索</h1>
-<input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autofocus>
+<input id="site-search" type="search" placeholder="搜索标题、标签和全文正文…" autofocus>
 <ul id="search-results" class="search-results"></ul></div></div>
 <script>const input=document.getElementById('site-search'),results=document.getElementById('search-results');const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');let data=[];
 fetch('search-index.json').then(r=>r.json()).then(x=>{data=x;run();});

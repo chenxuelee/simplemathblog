@@ -47,6 +47,7 @@ class Post(TypedDict):
     updated: str
     cover: str
     series: str
+    author: str
 
 
 def plain_text(text: str) -> str:
@@ -126,7 +127,7 @@ def load_posts(posts_dir: Path) -> list[Post]:
                       "description": str(meta.get("description") or excerpt),
                       "updated": validate_date(meta.get("updated") or d, "updated", f),
                       "cover": validate_resource_url(meta.get("cover") or "", "cover", f),
-                      "series": str(meta.get("series") or "")})
+                      "series": str(meta.get("series") or ""), "author": str(meta.get("author") or "")})
     posts.sort(key=lambda p: p["date"], reverse=True)
     return posts
 
@@ -180,6 +181,9 @@ img.zoomable { cursor:zoom-in; }
   border-radius:999px; padding:.05em .7em; font-size:.78em; margin-right:.4em; }
 .tagcloud { max-width:760px; margin:28px auto; padding-bottom:60px; }
 .tagcloud h3 { font-size:.95em; color:var(--muted); }
+.toc-active { color:var(--accent) !important; font-weight:700; background:var(--bg); }
+.copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
+pre,.math-copy-target { position:relative; display:block; } pre > .copy-button,.math-copy-target > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
 
 /* 文章布局：左侧目录 */
 #layout { display:flex; align-items:flex-start; }
@@ -335,6 +339,7 @@ const COVER_HTML = __COVER_HTML__;
   renderBareEnvironments();
   resolveCrossrefs(container);
   enhanceImages(container);
+  enhanceCopyButtons(container);
   // 左侧目录（toc:false 关闭）
   const show = !meta || !/^(false|no)$/i.test(String(meta.toc));
   const nav = document.getElementById("toc");
@@ -345,6 +350,7 @@ const COVER_HTML = __COVER_HTML__;
     lis.push(`<a class="${h.tagName === "H3" ? "lv3" : ""}" href="#${esc(h.id)}">${esc(h.textContent)}</a>`);
   });
   nav.innerHTML = lis.join("") || '<span style="color:var(--muted)">（无章节）</span>';
+  setupTocScrollSpy(container, nav);
 })(SRC);
 </script>
 </body>
@@ -390,7 +396,7 @@ def build_index(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
                      for t, n in sorted(tagcount.items(), key=lambda x: -x[1]))
     body = f"""
 <div class="wrap">
-  <div class="search-box"><input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autocomplete="off"><ul id="search-results" class="search-results"></ul></div>
+  <div class="search-box"><input id="site-search" type="search" placeholder="搜索标题、标签和全文正文…" autocomplete="off"><ul id="search-results" class="search-results"></ul></div>
   <ul class="post-list">{"".join(items) or "<li class='post-item'>暂无文章 — 在 content/ 中添加 .md 后重新构建。</li>"}</ul>
   <div class="tagcloud"><h3>🏷️ 标签</h3>{cloud}</div>
 </div>"""
@@ -408,7 +414,7 @@ input.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();
 
 def build_search(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
     body = """<div class="wrap"><div class="search-box"><h1>搜索</h1>
-<input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autofocus>
+<input id="site-search" type="search" placeholder="搜索标题、标签和全文正文…" autofocus>
 <ul id="search-results" class="search-results"></ul></div></div>
 <script>const input=document.getElementById('site-search'),results=document.getElementById('search-results');const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');let data=[];
 fetch('search-index.json').then(r=>r.json()).then(x=>{data=x;run();});
@@ -420,15 +426,22 @@ input.addEventListener('input',run);</script>"""
 
 def build_search_index(posts: list[Post], out_dir: Path) -> None:
     data = [{"title": p["title"], "excerpt": p["excerpt"], "url": f"{p['slug']}.html",
-             "search": " ".join([p["title"], p["excerpt"], *p["tags"]]).lower()} for p in posts]
+             "search": " ".join([p["title"], p["excerpt"], plain_text(p["body"]), *p["tags"]]).lower()} for p in posts]
     (out_dir / "search-index.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
 def build_rss(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
-    items = "".join(f"<item><title>{esc(p['title'])}</title><link>{esc(absolute_url(p['slug'] + '.html', base_url))}</link>"
-                    f"<guid>{esc(absolute_url(p['slug'] + '.html', base_url))}</guid><pubDate>{esc(rss_date(p['date']))}</pubDate>"
-                    f"<description>{esc(p['description'])}</description></item>" for p in posts)
-    rss = f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>My Blog</title><link>{esc(base_url or "./")}</link><description>数学博客</description>{items}</channel></rss>'
+    def item(post: Post) -> str:
+        url = esc(absolute_url(post["slug"] + ".html", base_url))
+        categories = "".join(f"<category>{esc(tag)}</category>" for tag in post["tags"])
+        creator = f"<dc:creator>{esc(post['author'])}</dc:creator>" if post["author"] else ""
+        return (f"<item><title>{esc(post['title'])}</title><link>{url}</link><guid isPermaLink=\"true\">{url}</guid>"
+                f"<pubDate>{esc(rss_date(post['date']))}</pubDate><lastBuildDate>{esc(rss_date(post['updated']))}</lastBuildDate>"
+                f"{categories}{creator}<description>{esc(post['description'])}</description></item>")
+    items = "".join(item(post) for post in posts)
+    latest = rss_date(posts[0]['updated']) if posts else rss_date(date.today().isoformat())
+    self_link = absolute_url("rss.xml", base_url)
+    rss = f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>My Blog</title><link>{esc(base_url or "./")}</link><description>数学博客</description><language>zh-CN</language><lastBuildDate>{esc(latest)}</lastBuildDate><atom:link href="{esc(self_link)}" rel="self" type="application/rss+xml"/>{items}</channel></rss>'
     (out_dir / "rss.xml").write_text(rss, encoding="utf-8")
 
 
@@ -456,10 +469,10 @@ def build_tags(posts: list[Post], out_dir: Path, base_url: str = "") -> None:
 
 def build_post(p: Post, pipeline_js: str, out_dir: Path, newer: Post | None = None,
                older: Post | None = None, related: tuple[Post, ...] | list[Post] = (),
-               base_url: str = "") -> None:
+               base_url: str = "", position: int = 1, total: int = 1) -> None:
     sub = f"{p['date']}"
     cover = f'<img class="cover" src="{esc(p["cover"])}" alt="{esc(p["title"])}">' if p["cover"] else ""
-    nav = '<nav class="post-nav">' + (f'<a href="{esc(newer["slug"])}.html">← {esc(newer["title"])}</a>' if newer else '<span></span>') + (f'<a href="{esc(older["slug"])}.html">{esc(older["title"])} →</a>' if older else '<span></span>') + '</nav>'
+    nav = '<nav class="post-nav">' + (f'<a href="{esc(newer["slug"])}.html">← 更新文章</a>' if newer else '<span></span>') + f'<span>第 {position} / {total} 篇</span>' + (f'<a href="{esc(older["slug"])}.html">更早文章 →</a>' if older else '<span></span>') + '</nav>'
     related_html = ""
     if related:
         related_html = '<section class="related"><b>相关文章</b><ul>' + ''.join(
@@ -528,7 +541,8 @@ def main() -> None:
         build_post(p, pipeline_js, staging,
                    newer=posts[i - 1] if i else None,
                    older=posts[i + 1] if i + 1 < len(posts) else None,
-                   related=related_posts(p, posts), base_url=base_url)
+                   related=related_posts(p, posts), base_url=base_url,
+                   position=i + 1, total=len(posts))
 
     if out_dir.exists():
         shutil.rmtree(out_dir)

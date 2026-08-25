@@ -28,6 +28,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-s
   border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
 #toolbar button:hover { border-color: var(--accent); color: var(--accent); }
 #toolbar .spacer { flex: 1; }
+#reader-search { width: 190px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background:var(--bg); color:var(--fg); }
 #file-input { display: none; }
 #status { color: var(--muted); font-size: 13px; }
 #container { max-width: 880px; margin: 0 auto; padding: 32px 28px 120px; line-height: 1.75; font-size: 16px; }
@@ -84,6 +85,11 @@ a.ref-link { color: var(--accent); text-decoration: none; border-bottom: 1px dot
 .toc-box .toc-title { font-weight: 700; margin-bottom: .4em; }
 .toc-box ol { margin: 0; padding-left: 1.4em; }
 .toc-box a { text-decoration: none; }
+.toc-active { color:var(--accent) !important; font-weight:700; background:var(--card); }
+.search-hit { background:rgba(79,70,229,.14); outline:1px solid var(--accent); border-radius:4px; }
+.copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
+pre,.math-copy-target { position:relative; display:block; }
+pre > .copy-button,.math-copy-target > .copy-button { position:absolute; top:7px; right:7px; z-index:1; }
 </style>
 </head>
 <body>
@@ -94,6 +100,7 @@ a.ref-link { color: var(--accent); text-decoration: none; border-bottom: 1px dot
   <button id="btn-print">🖨️ 导出 PDF</button>
   <button id="btn-width" title="切换宽版排版">↔ 宽度</button>
   <button id="btn-size" title="切换大字号">A 字号</button>
+  <input id="reader-search" type="search" placeholder="搜索正文…">
   <span class="spacer"></span>
   <input type="file" id="file-input" accept=".md,.markdown,.txt,.tex">
   <span id="status">内置演示文档 · 支持拖拽 .md 文件进窗口</span>
@@ -109,6 +116,7 @@ a.ref-link { color: var(--accent); text-decoration: none; border-bottom: 1px dot
 const container = document.getElementById("container");
 const editor = document.getElementById("editor");
 const statusEl = document.getElementById("status");
+const searchEl = document.getElementById("reader-search");
 const DEMO = `---
 title: 增强数学 Markdown 阅读器
 author: YanTao Wang
@@ -251,6 +259,13 @@ window.addEventListener("scroll", () => {
   document.getElementById("reading-progress").style.width = `${total > 0 ? scrollY / total * 100 : 0}%`;
 }, { passive: true });
 editor.addEventListener("input", () => { currentSrc = editor.value; render(currentSrc); });
+searchEl.addEventListener("input", () => {
+  const q = searchEl.value.trim().toLowerCase(); let count = 0;
+  container.querySelectorAll("p,li,h1,h2,h3,h4,blockquote,.thm-body").forEach(el => {
+    const hit = q && el.textContent.toLowerCase().includes(q); el.classList.toggle("search-hit", Boolean(hit)); if (hit) count++;
+  });
+  if (q) { statusEl.textContent = `正文命中 ${count} 处`; const first = container.querySelector(".search-hit"); if (first) first.scrollIntoView({ behavior:"smooth", block:"center" }); }
+});
 
 let currentSrc = DEMO;
 function loadFile(file) {

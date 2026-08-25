@@ -64,13 +64,14 @@ function restoreMath(html) {
   return html.replace(new RegExp(PLACEHOLDER_PREFIX + "(\\d+)\u0000", "g"), (_, idx) => {
     const m = mathStore[+idx];
     try {
-      return katex.renderToString(m.tex, {
+      const rendered = katex.renderToString(m.tex, {
         displayMode: m.display,
         throwOnError: false,
         strict: false,
         trust: false,
         macros: MACROS,
       }).replace("katex-display", m.display ? "katex-display eq-block" : "katex");
+      return `<span class="math-copy-target" data-tex="${esc(m.tex)}">${rendered}</span>`;
     } catch (e) {
       return `<span class="math-error">${m.tex.replace(/</g,"&lt;")} — ${e.message}</span>`;
     }
@@ -220,13 +221,24 @@ markdownRenderer.image = (href, title, text) => {
   const safe = safeUrl(href);
   return safe ? `<img src="${esc(safe)}" alt="${esc(text || "")}"${title ? ` title="${esc(title)}"` : ""}>` : esc(text || "");
 };
+markdownRenderer.code = (code, infostring) => {
+  // marked v12 calls renderers with a token object; older supported versions
+  // pass (code, infostring). Supporting both keeps exported pages portable.
+  const token = typeof code === "object" && code !== null ? code : null;
+  const text = token ? token.text : String(code);
+  const lang = String(token ? token.lang || "" : infostring || "").trim().split(/\s+/)[0];
+  let highlighted;
+  try {
+    highlighted = lang && hljs.getLanguage(lang)
+      ? hljs.highlight(text, { language: lang }).value
+      : hljs.highlightAuto(text).value;
+  } catch { highlighted = esc(text); }
+  const languageClass = lang ? ` language-${esc(lang)}` : "";
+  return `<pre><code class="hljs${languageClass}">${highlighted}</code></pre>\n`;
+};
 marked.setOptions({
   gfm: true, breaks: false,
   renderer: markdownRenderer,
-  highlight: (code, lang) => {
-    try { return lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value; }
-    catch { return code; }
-  },
 });
 
 // ============ Front Matter (YAML) ============
@@ -304,10 +316,55 @@ function enhanceImages(root) {
   });
 }
 
+async function copyText(value, button) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = value; document.body.append(area); area.select(); document.execCommand("copy"); area.remove();
+  }
+  const old = button.textContent; button.textContent = "已复制";
+  setTimeout(() => { button.textContent = old; }, 1200);
+}
+
+// Add copy controls after all transformations so code and TeX source remain intact.
+function enhanceCopyButtons(root) {
+  root.querySelectorAll("pre").forEach(pre => {
+    if (pre.querySelector(":scope > .copy-button")) return;
+    const button = document.createElement("button");
+    button.className = "copy-button"; button.type = "button"; button.textContent = "复制代码";
+    button.onclick = () => copyText(pre.querySelector("code")?.textContent || "", button);
+    pre.append(button);
+  });
+  root.querySelectorAll(".math-copy-target").forEach(target => {
+    if (target.querySelector(":scope > .copy-button")) return;
+    const button = document.createElement("button");
+    button.className = "copy-button math-copy-button"; button.type = "button"; button.textContent = "复制公式";
+    button.onclick = () => copyText(target.dataset.tex || "", button);
+    target.append(button);
+  });
+}
+
+let stopTocSpy = () => {};
+function setupTocScrollSpy(container, nav) {
+  stopTocSpy();
+  if (!nav) return;
+  const links = [...nav.querySelectorAll('a[href^="#"]')];
+  const pairs = links.map(link => [link, container.querySelector(link.getAttribute("href"))]).filter(([, head]) => head);
+  if (!pairs.length) return;
+  const update = () => {
+    let active = pairs[0][0];
+    for (const [link, head] of pairs) if (head.getBoundingClientRect().top <= 130) active = link;
+    links.forEach(link => { const on = link === active; link.classList.toggle("toc-active", on); link.toggleAttribute("aria-current", on); });
+  };
+  window.addEventListener("scroll", update, { passive: true }); update();
+  stopTocSpy = () => window.removeEventListener("scroll", update);
+}
+
 // toc: true —— 从渲染后的 HTML 收集 h2/h3 生成目录（在标题上加锚点）
 function buildToc(container, insertBeforeEl) {
   const heads = container.querySelectorAll("h2, h3");
-  if (!heads.length) return;
+  if (!heads.length) return null;
   let i = 0;
   const lis = [];
   heads.forEach(h => {
@@ -316,6 +373,7 @@ function buildToc(container, insertBeforeEl) {
   });
   insertBeforeEl.insertAdjacentHTML("beforebegin",
     `<div class="toc-box"><div class="toc-title">目录</div><ol>${lis.join("")}</ol></div>`);
+  return insertBeforeEl.previousElementSibling;
 }
 
 function render(src) {
@@ -337,11 +395,12 @@ function render(src) {
   // toc: true —— 目录插在元数据卡片之后（无卡片则在最前）
   if (meta && /^(true|yes)$/i.test(String(meta.toc))) {
     const anchor = container.querySelector(".fm-card") || container.firstElementChild;
-    if (anchor) buildToc(container, anchor); else { const d = document.createElement("div"); container.prepend(d); buildToc(container, d); }
+    if (anchor) setupTocScrollSpy(container, buildToc(container, anchor)); else { const d = document.createElement("div"); container.prepend(d); setupTocScrollSpy(container, buildToc(container, d)); }
   }
   renderBareEnvironments();
   resolveCrossrefs(container);
   enhanceImages(container);
+  enhanceCopyButtons(container);
 }
 
 // 对未包裹 $ 的 \begin{equation}/align/gather 等做兜底渲染

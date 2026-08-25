@@ -55,6 +55,9 @@ img.zoomable { cursor:zoom-in; }
   border-radius:999px; padding:.05em .7em; font-size:.78em; margin-right:.4em; }
 .tagcloud { max-width:760px; margin:28px auto; padding-bottom:60px; }
 .tagcloud h3 { font-size:.95em; color:var(--muted); }
+.toc-active { color:var(--accent) !important; font-weight:700; background:var(--bg); }
+.copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
+pre,.math-copy-target { position:relative; display:block; } pre > .copy-button,.math-copy-target > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
 
 /* 文章布局：左侧目录 */
 #layout { display:flex; align-items:flex-start; }
@@ -129,7 +132,7 @@ footer.site { border-top:1px solid var(--border); color:var(--muted);
 </div></header>
 
 <div class="wrap">
-  <div class="search-box"><input id="site-search" type="search" placeholder="搜索标题、标签和摘要…" autocomplete="off"><ul id="search-results" class="search-results"></ul></div>
+  <div class="search-box"><input id="site-search" type="search" placeholder="搜索标题、标签和全文正文…" autocomplete="off"><ul id="search-results" class="search-results"></ul></div>
   <ul class="post-list"><li class="post-item">
   <h2><a href="fourier-series.html">傅里叶级数与 Dirichlet 收敛</a></h2>
   <div class="post-date">2026-08-23 &nbsp;·&nbsp; <a class="tag" href="tags.html#分析">分析</a> <a class="tag" href="tags.html#傅里叶">傅里叶</a> <a class="tag" href="tags.html#教学">教学</a></div>

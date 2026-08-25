@@ -86,6 +86,7 @@ body { margin: 0; background: var(--bg); color: var(--fg);
   color: var(--fg); text-decoration: none; font-size: 13px; line-height: 1.5; }
 #sidebar nav a:hover { background: var(--bg); color: var(--accent); }
 #sidebar nav a.lv3 { margin-left: 1.2em; color: var(--muted); font-size: 12.5px; }
+.toc-active { color:var(--accent) !important; font-weight:700; background:var(--bg); }
 #main { flex: 1; min-width: 0; }
 #container { max-width: 880px; margin: 0 auto; padding: 40px 36px 140px;
   line-height: 1.75; font-size: 16px; }
@@ -141,6 +142,8 @@ a.ref-link { color: var(--accent); text-decoration: none;
 .fm-tag { background: var(--accent); color: #fff; opacity: .85;
   border-radius: 999px; padding: .05em .7em; font-size: .82em; }
 .cover { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; margin-top: 1em; }
+.copy-button { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:12px; }
+pre,.math-copy-target { position:relative; display:block; } pre > .copy-button,.math-copy-target > .copy-button { position:absolute;top:7px;right:7px;z-index:1; }
 
 @media print {
   #sidebar { display: none; }
@@ -181,6 +184,7 @@ function renderExport(src) {
   renderBareEnvironments();
   resolveCrossrefs(container);
   enhanceImages(container);
+  enhanceCopyButtons(container);
   buildSidebarToc(meta);
 }
 
@@ -198,6 +202,7 @@ function buildSidebarToc(meta) {
   });
   nav.innerHTML = lis.join("") ||
     '<span style="color:var(--muted);font-size:13px">（无章节标题）</span>';
+  setupTocScrollSpy(container, nav);
 }
 
 renderExport(SRC);
