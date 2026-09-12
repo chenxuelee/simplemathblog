@@ -22,11 +22,12 @@ import json
 import re
 import shutil
 import sys
+import subprocess
 import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).parent))
 from frontmatter import parse_front_matter
@@ -36,6 +37,7 @@ HERE = Path(__file__).parent.resolve()
 
 
 class Post(TypedDict):
+    source: str
     slug: str
     title: str
     date: str
@@ -57,10 +59,26 @@ def plain_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def rewrite_local_links(text: str) -> str:
+CODE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|\Z)|(`+)[\s\S]*?\2(?!`)", re.M)
+
+
+def transform_prose(text: str, transform) -> str:
+    """Apply a transform only outside fenced/inline code."""
+    chunks, end = [], 0
+    for match in CODE_RE.finditer(text):
+        chunks.extend((transform(text[end:match.start()]), match.group()))
+        end = match.end()
+    return "".join(chunks) + transform(text[end:])
+
+
+def rewrite_local_links(text: str, targets: dict[str, str] | None = None) -> str:
     """博客根目录中将 Markdown 文章链接改为生成的 HTML 链接。"""
-    return re.sub(r"(\]\()([^:)#]+)\.(?:md|markdown)(#[^)]+)?(\))",
-                  lambda m: f"{m.group(1)}{m.group(2)}.html{m.group(3) or ''}{m.group(4)}", text)
+    def replace(match: re.Match[str]) -> str:
+        path = unquote(match[2]).removeprefix("./")
+        slug = (targets or {}).get(path, str(Path(path).with_suffix("")))
+        return f"{match[1]}{quote(slug)}.html{match[3] or ''}{match[4]}"
+    return transform_prose(text, lambda part: re.sub(
+        r"(\]\()([^:)#?]+\.(?:md|markdown))([?#][^\s)]*)?(\))", replace, part))
 
 
 def rewrite_article_citations(text: str, posts: list[Post]) -> str:
@@ -72,11 +90,13 @@ def rewrite_article_citations(text: str, posts: list[Post]) -> str:
         if not post:
             return f"**[未找到文章：{slug}]**"
         return f"\n\n> **推荐阅读 · [{post['title']}]({post['slug']}.html)**\n>\n> {post['excerpt']}\n\n"
-    return re.sub(r"\[\[([^\]]+)\]\]", replace, text)
+    return transform_prose(text, lambda part: re.sub(r"\[\[([^\]]+)\]\]", replace, part))
 
 
 def absolute_url(path: str, base_url: str = "") -> str:
     """为 RSS、sitemap 与 meta 标签生成规范 URL。"""
+    if urlsplit(path).scheme in {"http", "https"}:
+        return path
     encoded = quote(path.lstrip("/"), safe="/%#?=&")
     return f"{base_url.rstrip('/')}/{encoded}" if base_url else encoded
 
@@ -92,7 +112,9 @@ def rss_date(value: str) -> str:
 
 def validate_slug(value: object, source: Path) -> str:
     slug = str(value).strip()
-    if not slug or slug in {".", ".."} or Path(slug).name != slug or slug.endswith(".html"):
+    if (not slug or slug.lower() in {"index", "tags", "search", ".", ".."}
+            or Path(slug).name != slug or slug.endswith(".html")
+            or re.search(r'[\\?#%:\s]', slug)):
         raise ValueError(f"{source.name}: slug 必须是单个文件名，不能包含路径或 .html 后缀")
     return slug
 
@@ -111,7 +133,7 @@ def validate_resource_url(value: object, field: str, source: Path) -> str:
         return ""
     if re.match(r"^https?://", url):
         return url
-    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url) or ".." in Path(url).parts:
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url) or ".." in Path(url).parts or url.startswith(("/", "\\")):
         raise ValueError(f"{source.name}: {field} 只允许 http(s) URL 或站点内相对路径")
     return url
 
@@ -119,7 +141,7 @@ def validate_resource_url(value: object, field: str, source: Path) -> str:
 def load_posts(posts_dir: Path) -> list[Post]:
     posts: list[Post] = []
     for f in sorted(posts_dir.glob("*.md")) + sorted(posts_dir.glob("*.markdown")):
-        raw = rewrite_local_links(f.read_text(encoding="utf-8"))
+        raw = f.read_text(encoding="utf-8")
         meta, body = parse_front_matter(raw)
         if meta.get("draft", "").lower() in ("true", "yes"):
             continue
@@ -134,14 +156,58 @@ def load_posts(posts_dir: Path) -> list[Post]:
         if not excerpt:
             plain = plain_text(body)
             excerpt = plain[:120] + ("…" if len(plain) > 120 else "")
-        posts.append({"slug": slug, "title": title, "date": d, "tags": tags,
+        posts.append({"source": f.name, "slug": slug, "title": title, "date": d, "tags": tags,
                       "meta": meta, "body": raw, "excerpt": excerpt,
                       "description": str(meta.get("description") or excerpt),
                       "updated": validate_date(meta.get("updated") or d, "updated", f),
                       "cover": validate_resource_url(meta.get("cover") or "", "cover", f),
                       "series": str(meta.get("series") or ""), "author": str(meta.get("author") or "")})
+    targets = {p["source"]: p["slug"] for p in posts}
+    for post in posts:
+        post["body"] = rewrite_local_links(post["body"], targets)
     posts.sort(key=lambda p: p["date"], reverse=True)
     return posts
+
+
+def validate_posts(posts: list[Post], posts_dir: Path) -> list[str]:
+    """Validate local inline links/images/cards; never fetch external URLs."""
+    problems = []
+    slugs = {p["slug"] for p in posts}
+    pages = {"index.html", "tags.html", "search.html", *(s + ".html" for s in slugs)}
+    for post in posts:
+        raw = post["body"]
+        prose = CODE_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), raw)
+        def report(offset: int, message: str) -> None:
+            problems.append(f"{post['source']}:{raw.count(chr(10), 0, offset) + 1}: {message}")
+        for match in re.finditer(r"\[\[([^\]]+)\]\]", prose):
+            if match[1].strip() not in slugs:
+                report(match.start(), f"未找到文章：{match[1]}")
+        resources = [(m.start(), m[1]) for m in re.finditer(r'!?\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\)', prose)]
+        if post["cover"]:
+            resources.append((0, post["cover"]))
+        for offset, resource in resources:
+            url = urlsplit(resource)
+            if url.scheme or url.netloc or not url.path:
+                continue
+            path = unquote(url.path).removeprefix("./")
+            if path in pages:
+                continue
+            target = (posts_dir / path).resolve()
+            if not target.is_relative_to(posts_dir.resolve()) or not target.is_file():
+                report(offset, f"缺失本地链接或图片：{resource}")
+    return problems
+
+
+def validate_rendering(posts: list[Post]) -> list[str]:
+    """Use the same vendored JS renderer for publishing checks."""
+    try:
+        result = subprocess.run(["node", str(HERE / "scripts" / "check-renderer.cjs")],
+                                input=json.dumps(posts), text=True, capture_output=True, check=True)
+    except FileNotFoundError as error:
+        raise ValueError("--strict 需要 Node.js 来校验数学渲染") from error
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"渲染校验失败：{error.stderr}") from error
+    return json.loads(result.stdout)
 
 
 # ---------------------------------------------------------------- 页面模板
@@ -358,18 +424,10 @@ const SRC = __SRC_JSON__;
 const COVER_HTML = __COVER_HTML__;
 
 (function renderPost(src) {
-  thmStore = []; crefStore = [];
-  bibEntries = parseBibtex(""); citationOrder = [];
-  for (const k in counters) delete counters[k];
-  const { meta, body } = parseFrontMatter(src);
+  const prepared = prepareDocument(src);
+  const { meta } = prepared;
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(extractBibtexBlocks(preprocessMarkdown(body)));
-  s = processCrossrefs(s);
-  s = processCitations(s);
-  const stashed = protectMath(s);
-  let html = marked.parse(stashed);
-  html = restoreMath(html);
-  html = renderTheorems(html);
+  let html = prepared.html;
   if (meta) html = renderFrontMatter(meta) + html;
   container.innerHTML = html;
   if (COVER_HTML) container.insertAdjacentHTML("afterbegin", COVER_HTML);
@@ -556,6 +614,7 @@ def main() -> None:
     ap.add_argument("--posts", default=str(HERE / "content"))
     ap.add_argument("--out", default=str(HERE / "site"))
     ap.add_argument("--base-url", default="", help="生产站点根 URL，例如 https://example.com")
+    ap.add_argument("--strict", action="store_true", help="拒绝断链、缺失图片/文献、重复标签和无效公式（需 Node.js）")
     args = ap.parse_args()
 
     posts_dir, out_dir = Path(args.posts).resolve(), Path(args.out).resolve()
@@ -577,6 +636,11 @@ def main() -> None:
         if post["slug"] in seen_slugs:
             sys.exit(f"错误：重复 slug：{post['slug']}")
         seen_slugs.add(post["slug"])
+
+    if args.strict:
+        problems = validate_posts(posts, posts_dir) + validate_rendering(posts)
+        if problems:
+            sys.exit("发布校验失败：\n" + "\n".join(problems))
 
     # Build into a sibling staging directory. A successful build replaces the
     # complete old tree, so deleted posts/assets cannot linger in production.
