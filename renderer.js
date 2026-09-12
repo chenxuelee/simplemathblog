@@ -8,6 +8,53 @@ let mathStore = [];
 let externalBibtex = "";
 let bibEntries = {};
 let citationOrder = [];
+let codeStore = [];
+let renderDiagnostics = [];
+
+// Protect code before ANY extension processes labels, citations or math.
+function protectCode(src) {
+  return src.replace(/^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^\1\2[ \t]*$|(?![\s\S]))|(`+)[\s\S]*?\3(?!`)/gm, code => {
+    const token = `CODEZ${codeStore.length}ENDCODE`;
+    codeStore.push(code);
+    return token;
+  });
+}
+function restoreCode(src) {
+  return src.replace(/CODEZ(\d+)ENDCODE/g, (token, n) => codeStore[+n] ?? token);
+}
+
+function prepareDocument(src, bibliography = "") {
+  thmStore = []; crefStore = []; codeStore = []; renderDiagnostics = [];
+  refTable = {}; eqCounter = 0;
+  bibEntries = parseBibtex(bibliography); citationOrder = [];
+  for (const k in counters) delete counters[k];
+  const { meta, body } = parseFrontMatter(src);
+  // BibTeX fences are intentionally consumed; all other code stays literal.
+  let s = protectCode(extractBibtexBlocks(body));
+  const labels = new Set();
+  for (const match of s.matchAll(/\\label\{([^}]+)\}|\\begin\{(?:theorem|lemma|proposition|corollary|conjecture|definition|example|remark)\*?\}((?:\[[^\]]*\]|\{[^}]*\}){0,2})/g)) {
+    const label = match[1] || parseThmArgs(match[2] || "").label;
+    if (label && labels.has(label)) renderDiagnostics.push(`重复标签：${label}`);
+    if (label) labels.add(label);
+  }
+  // Collect citations in source order, including theorem/proof bodies.
+  s = extractTheorems(processCrossrefs(processCitations(preprocessMarkdown(s))));
+  let html = restoreMath(marked.parse(restoreCode(protectMath(s))));
+  html = renderTheorems(html);
+  for (const { label } of crefStore) {
+    if (!refTable[label]) renderDiagnostics.push(`未定义引用：${label}`);
+  }
+  for (const key of citationOrder) {
+    if (!bibEntries[key]) renderDiagnostics.push(`缺失文献：${key}`);
+  }
+  return { meta, html };
+}
+
+function equationAnchors(tex, html) {
+  const ids = Object.entries(refTable).filter(([, entry]) =>
+    entry.kind === "equation" && tex.includes(`\\tag{${entry.number}}`));
+  return ids.map(([label]) => `<span id="lbl-${esc(label)}" class="equation-anchor"></span>`).join("") + html;
+}
 
 function protectMath(src) {
   mathStore = [];
@@ -19,6 +66,8 @@ function protectMath(src) {
   let out = "";
   let i = 0, n = src.length;
   while (i < n) {
+    const bare = src.slice(i).match(/^\\begin\{(equation\*?|align\*?|alignat\*?|gather\*?|multline\*?|eqnarray\*?|split|flalign\*?)\}[\s\S]*?\\end\{\1\}/);
+    if (bare) { out += stash(bare[0], true); i += bare[0].length; continue; }
     // 跳过代码块/行内代码，其中的 $ 不算数学定界符
     const fence = src.slice(i).match(/^(```+|~~~+)/);
     if (fence) {
@@ -69,14 +118,16 @@ function restoreMath(html) {
     try {
       const rendered = katex.renderToString(m.tex, {
         displayMode: m.display,
-        throwOnError: false,
+        throwOnError: true,
         strict: false,
         trust: false,
         macros: MACROS,
       }).replace("katex-display", m.display ? "katex-display eq-block" : "katex");
-      return rendered;
+      if (rendered.includes('class="katex-error"')) renderDiagnostics.push(`无效公式：${m.tex}`);
+      return equationAnchors(m.tex, rendered);
     } catch (e) {
-      return `<span class="math-error">${m.tex.replace(/</g,"&lt;")} — ${e.message}</span>`;
+      renderDiagnostics.push(`无效公式：${m.tex} — ${e.message}`);
+      return `<span class="math-error">${esc(m.tex)} — ${esc(e.message)}</span>`;
     }
   });
 }
@@ -124,7 +175,6 @@ function parseThmArgs(argStr) {
 }
 
 function extractTheorems(src) {
-  refTable = {}; eqCounter = 0;
   return src.replace(THM_ENV_RE, (match, kind, argStr, body) => {
     if (!kind) return match; // 是代码块，原样保留
     const starred = match.includes("\\begin{" + kind + "*}");
@@ -147,7 +197,10 @@ function renderTheorems(html) {
     if (t.isProof) {
       headName = `<span class="thm-head">${meta.zh}.</span>`;
     } else {
-      if (t.starred) { headName = `<span class="thm-head">${meta.zh}${starredSuffix(meta)}.</span>`; }
+      if (t.starred) {
+        headName = `<span class="thm-head"${t.label ? ` id="lbl-${esc(t.label)}"` : ""}>${meta.zh}${starredSuffix(meta)}.</span>`;
+        if (t.label) refTable[t.label] = { number: "", kind: t.kind, zh: meta.zh };
+      }
       else {
         counters[meta.counter] = (counters[meta.counter] || 0) + 1;
         const num = counters[meta.counter];
@@ -155,7 +208,7 @@ function renderTheorems(html) {
         if (t.label) refTable[t.label] = { number: num, kind: t.kind, zh: meta.zh };
       }
     }
-    const bodyHtml = restoreMath(marked.parse(protectMath(processCrossrefs(t.body))));
+    const bodyHtml = restoreMath(marked.parse(restoreCode(protectMath(processCrossrefs(t.body)))));
     const qed = t.isProof ? '<span class="qed">∎</span>' : "";
     return `<div class="thm-env ${t.kind}">${headName}<div class="thm-body">${bodyHtml}</div>${qed}</div>`;
   });
@@ -222,7 +275,7 @@ function bibliographyText(entry) {
 function renderBibliography(root) {
   const cited = citationOrder.filter(key => bibEntries[key]);
   if (!cited.length) return;
-  const items = cited.map((key, index) => `<li id="ref-${esc(key)}"><span class="ref-number">[${index + 1}]</span> ${esc(bibliographyText(bibEntries[key]))}</li>`).join("");
+  const items = cited.map(key => `<li id="ref-${esc(key)}"><span class="ref-number">[${citationOrder.indexOf(key) + 1}]</span> ${esc(bibliographyText(bibEntries[key]))}</li>`).join("");
   root.insertAdjacentHTML("beforeend", `<section class="bibliography"><h2>参考文献</h2><ol>${items}</ol></section>`);
 }
 
@@ -435,21 +488,12 @@ function buildToc(container, insertBeforeEl) {
 }
 
 function render(src) {
-  thmStore = []; crefStore = [];
-  bibEntries = parseBibtex(externalBibtex); citationOrder = [];
-  for (const k in counters) delete counters[k];
-  // 0) Front Matter：剥离元数据，正文进入管线
-  const { meta, body } = parseFrontMatter(src);
+  const prepared = prepareDocument(src, externalBibtex);
+  const { meta } = prepared;
   if (meta && meta.title) document.title = meta.title + " · MD Reader";
   else document.title = "Enhanced Markdown Reader";
   // 管线顺序：定理提取 → 交叉引用占位 → 数学保护 → marked 解析
-  let s = extractTheorems(extractBibtexBlocks(preprocessMarkdown(body)));
-  s = processCrossrefs(s);
-  s = processCitations(s);
-  const stashed = protectMath(s);
-  let html = marked.parse(stashed);
-  html = restoreMath(html);
-  html = renderTheorems(html);   // 定理块内部再做数学渲染
+  let html = prepared.html;
   if (meta) html = renderFrontMatter(meta) + html;
   container.innerHTML = html;
   // toc: true —— 目录插在元数据卡片之后（无卡片则在最前）
@@ -483,8 +527,8 @@ function renderBareEnvironments() {
       fragment.append(document.createTextNode(text.slice(last, match.index)));
       const span = document.createElement("span");
       try {
-        span.innerHTML = katex.renderToString(match[0].replace(/^\u0000|\u0000$/g, ""),
-          { displayMode: true, throwOnError: false, strict: false, trust: false, macros: MACROS });
+        span.innerHTML = equationAnchors(match[0], katex.renderToString(match[0].replace(/^\u0000|\u0000$/g, ""),
+          { displayMode: true, throwOnError: false, strict: false, trust: false, macros: MACROS }));
         fragment.append(span);
       } catch {
         fragment.append(document.createTextNode(match[0]));

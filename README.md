@@ -158,7 +158,38 @@ slug: custom-url
 
 ```bash
 uv run python -m unittest discover -s tests -v
+node --test tests/renderer.test.cjs
+npm ci
+npx playwright install chromium
+npm run test:browser
 ```
+
+### 严格发布检查与 CI
+
+发布前建议运行（需要 Python 3.11+ 和 Node.js）：
+
+```bash
+uv run python blog.py --strict --base-url https://example.com/blog
+```
+
+`--strict` 使用仓库自带的渲染器和固定版本前端库，检查重复标签、未定义的
+`\\ref`/`\\eqref`/`\\autoref`、缺失文献和 KaTeX 解析错误；同时检查
+`[[slug]]`、内联 Markdown 本地链接/图片及封面路径。外部 URL 不联网检查，
+普通 HTML 片段锚点和引用式 Markdown 链接不在这轮路径校验范围内。
+路径错误附文件名和行号，渲染错误附文件名与标签/公式；失败时保留原站点。
+普通预览仍可不加 `--strict`。
+
+`index`、`tags`、`search` 是保留 slug。文章间 `.md` 链接会依据目标文章的
+自定义 slug 重写，代码示例不受影响。外部 `https://` 封面保持原 URL。
+
+所有分支推送和 PR 都执行测试及严格构建；仅 `main` 可进入单独的部署 job。
+浏览器测试检查最终构建产物，部署直接复用该产物。生产地址默认使用项目的
+GitHub Pages 地址；使用自定义域名时设置仓库变量 `SITE_BASE_URL`。
+仍需在 GitHub 仓库设置中启用 Pages，并选择 GitHub Actions 作为发布来源。
+Pylint 在 Python 3.11/3.12 上检查错误级问题；风格告警暂不作为发布门槛。
+
+阅读器、博客和 HTML 导出共用 `prepareDocument()`：代码先隔离，文献按源码
+顺序编号（缺失文献保留编号槽位），公式引用具有真实跳转锚点。
 
 ## 📐 数学环境
 

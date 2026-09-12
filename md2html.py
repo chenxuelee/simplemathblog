@@ -173,18 +173,10 @@ const container = document.getElementById("container");
 const SRC = __SRC_JSON__;
 
 function renderExport(src) {
-  thmStore = []; crefStore = [];
-  bibEntries = parseBibtex(""); citationOrder = [];
-  for (const k in counters) delete counters[k];
-  const { meta, body } = parseFrontMatter(src);
+  const prepared = prepareDocument(src);
+  const { meta } = prepared;
   if (meta && meta.title) document.title = meta.title;
-  let s = extractTheorems(extractBibtexBlocks(preprocessMarkdown(body)));
-  s = processCrossrefs(s);
-  s = processCitations(s);
-  const stashed = protectMath(s);
-  let html = marked.parse(stashed);
-  html = restoreMath(html);
-  html = renderTheorems(html);
+  let html = prepared.html;
   if (meta) html = renderFrontMatter(meta) + html;
   container.innerHTML = html;
   renderBareEnvironments();
