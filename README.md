@@ -1,8 +1,17 @@
-# Enhanced Markdown Reader（增强 Markdown 阅读器）
+# SimpleMathBlog · 增强 Markdown 阅读器与数学博客
 
-一个零构建、可离线运行的 Markdown 阅读器，专为**数学文档**设计：完整支持 KaTeX 数学环境、AMSL 定理环境和 LaTeX 风格的交叉引用。
+面向数学笔记的 Markdown 阅读、发布和导出工具，支持 KaTeX 公式、定理环境、LaTeX 风格交叉引用和 BibTeX 文献。
 
-参考了 Typora / Obsidian / GitHub 等主流方案的技术路线（marked + KaTeX），并在其基础上做了数学感知的解析管线增强。附带 Python 导出器，可将文档转换为带左侧目录的单文件 HTML。
+浏览器阅读器无需构建；Python 工具可生成静态博客、离线 HTML 和 PDF。PDF 导出使用 Playwright + Chromium，不需要安装 LaTeX。
+
+| 需求 | 入口 | 运行要求 |
+| --- | --- | --- |
+| 阅读或编辑 Markdown | `index.html` | 浏览器 |
+| 导出离线 HTML | `md2html.py` | Python 3.11+ |
+| 构建、预览博客 | `blog.py` / `server.py` | Python 3.11+；严格构建另需 Node.js |
+| 导出 PDF | `md2pdf.py` | Python 3.11+、Playwright、Chromium；中文需系统字体 |
+
+以下命令默认在仓库根目录执行；`uv` 用于管理 Python 环境，PDF 章节也提供 pip 安装方式。
 
 ## ✨ 特性
 
@@ -11,10 +20,11 @@
 - **交叉引用（crossref）** —— `\label` / `\ref` / `\eqref` / `\autoref`，引用渲染为可点击链接
 - **BibTeX 文献管理** —— 导入 `.bib` 文件或内嵌 `bibtex` 代码块；支持 `\cite{key}`、`[@key]` 与自动参考文献
 - **Front Matter** —— YAML 元数据块渲染为标题卡片（作者/日期/标签），支持自动目录
-- **单文件 HTML 导出** —— 附带 `md2html.py`，一键转换为带左侧目录侧栏的独立 HTML
+- **离线 HTML 导出** —— `md2html.py` 生成带左侧目录的 HTML，并复制所需运行时资源
+- **Python PDF 导出** —— `md2pdf.py` 支持纸张、页边距、横向排版、页码和严格数学校验
 - **静态博客系统** —— 附带 `blog.py`，`content/` 目录一键生成完整站点（首页 / 标签归档 / 文章页）
 - **文章引用与插图** —— `[[slug]]` 生成推荐阅读卡片；带标题的 Markdown 图片自动成为可放大的带图注插图
-- **共享渲染管线** —— `renderer.js` 被阅读器直接加载，并由两种导出路径内联，三处渲染逻辑保持同源
+- **共享渲染管线** —— 阅读器、博客、HTML 与 PDF 导出复用 `renderer.js`
 - **自定义宏** —— 内置 `\RR`、`\norm` 等常用宏，可自行扩展
 - **阅读体验** —— GFM 表格与任务列表、代码高亮、深色模式自适应、长公式横向滚动
 - **高效检索与摘录** —— 目录随滚动高亮、阅读器正文搜索、博客全文搜索；一键复制代码块
@@ -23,7 +33,7 @@
 
 ## 🚀 快速开始
 
-无需安装，直接用浏览器打开 `index.html` 即可。
+仅使用阅读器时，无需安装依赖，直接用浏览器打开 `index.html` 即可。
 
 ```bash
 # 或者本地起个服务（可选）
@@ -68,12 +78,14 @@ uv run python md2html.py notes.md --renderer /path/to/renderer.js
 
 导出文件的特点：
 
-- **渲染结果与阅读器预览 100% 一致** —— 转换器直接复用 `index.html` 中经过验证的 JS 渲染管线（数学环境、定理环境、交叉引用、Front Matter 全部支持），Python 只负责把 Markdown 源码嵌入模板
+- **复用阅读器的数学渲染逻辑** —— 转换器读取 `renderer.js`，Python 将 Markdown 源码嵌入 HTML 模板；版式由导出模板控制
 - **左侧目录侧栏** —— 自动收集 h2/h3 生成可点击目录（h3 缩进一级）；窄屏（<900px）自动折叠为顶部块；打印时隐藏
 - **侧栏开关** —— Front Matter 中 `toc: false` 可隐藏侧栏（默认显示）
 - **深色模式** —— 与阅读器一致，跟随系统设置
 - **离线可用** —— KaTeX、marked、highlight.js 固定在仓库的 `assets/vendor/`；导出页会自动复制这些资源，不依赖 CDN
 - **输入保护** —— 仅接受 `.md` / `.markdown` / `.txt` 输入，防止误覆盖其他文件
+
+分享离线 HTML 时，请同时附带输出目录中的 `assets/vendor/`，并保留文章图片的相对路径。它不是把所有字体和图片都嵌入 HTML 的单文件包。
 
 侧栏标题的取值优先级：Front Matter `title` → 文档第一个 `# h1` → 文件名。
 
@@ -112,7 +124,22 @@ python -m playwright install chromium --only-shell
 python md2pdf.py notes.md -o notes.pdf
 ```
 
-- 纸张支持 `A4`（默认）、`A5`、`Letter`；默认页边距为 18 mm。
+### PDF 命令参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `input` | 必填 | UTF-8 的 `.md`、`.markdown` 或 `.txt` 文件 |
+| `-o, --output` | 与输入同目录、同名的 `.pdf` | 输出路径；自动创建父目录 |
+| `--paper` | `A4` | `A4`、`A5` 或 `Letter` |
+| `--margin` | `18` | 四边页边距，单位 mm |
+| `--landscape` | 关闭 | 横向纸张 |
+| `--timeout` | `30` | 页面及资源等待超时，单位秒 |
+| `--browser` | Playwright 管理的 Chromium | 已有 Chrome/Chromium 的可执行文件路径 |
+| `--strict` | 关闭 | 数学公式、标签或文献引用有错误时拒绝导出 |
+
+### 资源与排版
+
+- 页边距至少 10 mm 时显示页码；更小页边距下隐藏页码。
 - `--timeout 60` 可延长页面和资源加载等待时间；`--browser /path/to/chrome`
   可指定已有的 Chrome/Chromium 可执行文件。
 - 本地图片以 Markdown 所在目录为基准，允许其子目录；请把图片放在该目录树内。
@@ -125,7 +152,7 @@ python md2pdf.py notes.md -o notes.pdf
 - 命令需在本项目内使用，依赖 `md2html.py`、`renderer.js` 和 `assets/vendor/`。
   输出 PDF 可单独分享，不需要附带这些文件。
 
-Python 调用：
+### Python 调用
 
 ```python
 from pathlib import Path
@@ -133,6 +160,19 @@ from md2pdf import convert
 
 convert(Path("notes.md"), Path("output/notes.pdf"), paper="A4", margin_mm=18, strict=True)
 ```
+
+### 常见问题
+
+| 现象 | 处理方法 |
+| --- | --- |
+| 提示缺少 Playwright | 执行 `uv sync --extra pdf`，并用 `uv run --extra pdf` 运行命令 |
+| Chromium 无法启动 | 安装浏览器及系统依赖，或用 `--browser` 指定已有浏览器 |
+| 中文显示为方框 | 安装中文系统字体后重新导出 |
+| 图片加载失败 | 检查相对路径、文件是否在 Markdown 目录树内，以及远程图片是否可访问 |
+| 严格模式拒绝导出 | 根据终端中的公式、标签或文献提示修正源码；代码示例请放在代码块内 |
+
+PDF 导出处理单篇文档；博客专用的 `[[slug]]` 推荐卡片由 `blog.py` 处理。
+HTML 导出和 PDF 导出使用文章内嵌的 BibTeX，不会读取浏览器阅读器里临时导入的文献库。
 
 ## 📝 静态博客系统
 
@@ -187,7 +227,7 @@ draft: true                # 草稿：不发布
 - 在 `content/assets/` 放本地资源；文章用 `![](assets/figure.png)` 引用，构建时自动复制到 `site/assets/`。
 - 用 `[[other-post]]` 引用同一博客中的其他文章；构建后会显示标题、摘要和跳转链接。`other-post` 是目标文章的 `slug`。
 - 图片可写为 `![替代文字](assets/figure.svg "图 1：图注")`；构建后自动生成带图注的插图卡片，点击图片可放大查看。
-- 文内相对文章链接会由 `[下一篇](next.md)` 自动改为 `next.html`。
+- 文内相对文章链接 `[下一篇](next.md)` 会按目标文章的实际 slug 改写；未自定义 slug 时为 `next.html`。
 - 支持 `cover`、`description`、`updated`、`series`、`slug` 等 Front Matter 字段；其中 `cover` 同时生成文章头图和 Open Graph 图片元数据。
 - `:::note`、`:::tip`、`:::warning` 块会被渲染为提示引用块；文章图片支持点击放大。
 - 阅读器提供阅读进度、宽版排版和大字号开关；Front Matter 的 `updated`、`series`、`cover` 会显示在元数据卡片中。
@@ -221,6 +261,18 @@ npx playwright install chromium
 npm run test:browser
 ```
 
+PDF 集成测试需要额外安装浏览器和测试依赖：
+
+```bash
+uv sync --extra pdf --group pdf-test
+uv run --extra pdf python -m playwright install chromium --only-shell
+RUN_PDF_TESTS=1 uv run --extra pdf --group pdf-test python -m unittest discover -s tests -p test_md2pdf.py -v
+```
+
+上述环境变量写法适用于 macOS/Linux。测试覆盖中文文本、数学引用跳转、图片、分页、
+横向纸张及失败时保留旧 PDF；普通测试默认跳过需要浏览器的 PDF 集成测试。
+CI 的 `pdf-sample` 工件包含生成的样例 PDF，可用于检查版式。
+
 ### 严格发布检查与 CI
 
 发布前建议运行（需要 Python 3.11+ 和 Node.js）：
@@ -230,7 +282,7 @@ uv run python blog.py --strict --base-url https://example.com/blog
 ```
 
 `--strict` 使用仓库自带的渲染器和固定版本前端库，检查重复标签、未定义的
-`\\ref`/`\\eqref`/`\\autoref`、缺失文献和 KaTeX 解析错误；同时检查
+`\ref`/`\eqref`/`\autoref`、缺失文献和 KaTeX 解析错误；同时检查
 `[[slug]]`、内联 Markdown 本地链接/图片及封面路径。外部 URL 不联网检查，
 普通 HTML 片段锚点和引用式 Markdown 链接不在这轮路径校验范围内。
 路径错误附文件名和行号，渲染错误附文件名与标签/公式；失败时保留原站点。
@@ -240,12 +292,12 @@ uv run python blog.py --strict --base-url https://example.com/blog
 自定义 slug 重写，代码示例不受影响。外部 `https://` 封面保持原 URL。
 
 所有分支推送和 PR 都执行测试及严格构建；仅 `main` 可进入单独的部署 job。
-浏览器测试检查最终构建产物，部署直接复用该产物。生产地址默认使用项目的
+浏览器测试检查最终构建产物；独立 PDF job 检查导出功能并上传样例 PDF。部署等待构建与 PDF 检查成功后，直接复用站点产物。生产地址默认使用项目的
 GitHub Pages 地址；使用自定义域名时设置仓库变量 `SITE_BASE_URL`。
 仍需在 GitHub 仓库设置中启用 Pages，并选择 GitHub Actions 作为发布来源。
 Pylint 在 Python 3.11/3.12 上检查错误级问题；风格告警暂不作为发布门槛。
 
-阅读器、博客和 HTML 导出共用 `prepareDocument()`：代码先隔离，文献按源码
+阅读器、博客、HTML 和 PDF 导出共用 `prepareDocument()`：代码先隔离，文献按源码
 顺序编号（缺失文献保留编号槽位），公式引用具有真实跳转锚点。
 
 ## 📐 数学环境
@@ -301,7 +353,7 @@ LaTeX 原生定界符也支持：
 ### 基本语法
 
 ```latex
-\begin{theorem}[标题]{标签}[可选：第二个参数会被当作标签]
+\begin{theorem}[标题]{标签}
 定理内容……
 \end{theorem}
 ```
@@ -323,7 +375,7 @@ LaTeX 原生定界符也支持：
 ```
 
 - 不需要编号时用星号版本：`\begin{theorem*}...\end{theorem*}`
-- `proof` 环境无参数，渲染为斜体「证明.」开头、右对齐 ∎ 结尾
+- `proof` 环境不编号，以「证明.」开头、∎ 结尾
 
 ### 完整示例
 
@@ -417,33 +469,31 @@ LaTeX 用户熟悉的引用系统完整移植：
 - [KaTeX](https://katex.org/) — 数学渲染（速度快、覆盖绝大多数 LaTeX 环境）
 - [highlight.js](https://highlightjs.org/) — 代码高亮
 
-渲染管线（顺序很关键）：
+渲染流程：
 
-```
-源文本
- │
- ├─ ① 提取定理与内嵌 BibTeX → 占位符/文献表
- ├─ ② 处理 \label 与 \cite → 编号占位符
- ├─ ③ 保护数学区域（$...$、$$...$$、\(...\)、\[...\]）→ 占位符
- ├─ ④ marked 解析剩余 Markdown，并由 highlight.js 高亮代码块
- ├─ ⑤ KaTeX 渲染占位的公式（含宏展开）
- ├─ ⑥ 回填定理、交叉引用与 BibTeX 引用
- └─ ⑦ 追加自动生成的参考文献列表
-```
+1. 解析 Front Matter 与内嵌 BibTeX，隔离代码示例。
+2. 按源码顺序收集文献引用和公式标签，再提取定理环境。
+3. 保护数学区域，交给 marked 解析 Markdown；使用 KaTeX 渲染公式。
+4. 回填定理，解析前向引用，生成公式锚点与参考文献。
+5. 添加目录、插图和复制按钮等阅读功能。
 
-关键设计点：
-
-- **占位符隔离** —— 数学与定理内容在 Markdown 解析前被摘出，避免 `*`、`_`、反斜杠等被误解析
-- **两遍引用** —— 先收集所有 `\label` 建立编号表，再统一替换引用，因此前向引用（引用后文）也能正确解析
-- **兜底渲染** —— 未包裹 `$` 的裸 `equation`/`align`/`gather` 等环境由 TreeWalker 二次扫描补渲染
+PDF 导出先使用 HTML 导出模板，再由 Python Playwright 等待字体、图片和渲染完成，
+应用打印样式后调用 Chromium 生成 PDF。中间 HTML 在临时目录中清理，
+成功后才替换目标 PDF。
 
 ## 📁 项目结构
 
 ```
-md-reader/
+simplemathblog/
 ├── index.html    # 阅读器（HTML + CSS + JS 单文件）
 ├── renderer.js    # 共享渲染管线：数学、定理、引用、BibTeX、代码高亮
-├── md2html.py    # 导出器：增强 Markdown → 离线 HTML（左侧目录）
+├── md2html.py    # 增强 Markdown → 离线 HTML（左侧目录）
+├── md2pdf.py     # 增强 Markdown → PDF（Playwright + Chromium）
+├── server.py     # 本地预览与监视重建
+├── frontmatter.py # Python 元数据解析
+├── tests/        # Python、渲染、浏览器与 PDF 回归测试
+├── pyproject.toml # Python 可选依赖与测试依赖
+├── uv.lock       # Python 依赖锁文件
 ├── blog.py       # 静态博客系统：content/ → site/（首页/归档/文章页）
 ├── assets/vendor/ # 固定版本的 marked、KaTeX、highlight.js 运行时资源
 ├── content/      # 博客文章目录（.md，含示例文章）
@@ -456,7 +506,7 @@ md-reader/
 - [ ] 英文界面切换
 - [ ] BibTeX 的 CSL 引用样式与更多嵌套字段
 - [ ] 博客：归档按年份分组
-- [ ] 导出时内联 KaTeX 字体实现完全离线
+- [ ] HTML 导出时内联字体和资源，实现真正的单文件 HTML
 
 ---
 
