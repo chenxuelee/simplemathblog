@@ -77,6 +77,63 @@ uv run python md2html.py notes.md --renderer /path/to/renderer.js
 
 侧栏标题的取值优先级：Front Matter `title` → 文档第一个 `# h1` → 文件名。
 
+## 📄 Markdown 转 PDF
+
+`md2pdf.py` 通过 [Python Playwright 的 Chromium PDF 接口](https://playwright.dev/python/docs/api/class-page#page-pdf)
+打印项目已有的 HTML 渲染结果。支持数学公式、定理环境、交叉引用、内嵌 BibTeX、
+中文、代码、表格和本地图片，无需安装 LaTeX。生成的正文可选择、搜索，公式保持矢量渲染。
+
+首次安装（Python 3.11+）：
+
+```bash
+uv sync --extra pdf
+uv run --extra pdf python -m playwright install chromium --only-shell
+```
+
+使用方法：
+
+```bash
+# 默认生成 content/fourier-series.pdf
+uv run --extra pdf python md2pdf.py content/fourier-series.md
+
+# 指定输出位置，严格检查公式与引用
+uv run --extra pdf python md2pdf.py content/fourier-series.md -o output/notes.pdf --strict
+
+# 调整纸张、页边距（毫米）和方向
+uv run --extra pdf python md2pdf.py notes.md -o notes.pdf --paper A5 --margin 15
+uv run --extra pdf python md2pdf.py notes.md --paper Letter --landscape
+```
+
+也可用 pip 安装依赖后直接执行 `python md2pdf.py`：
+
+```bash
+python -m pip install 'playwright>=1.58,<2'
+python -m playwright install chromium --only-shell
+python md2pdf.py notes.md -o notes.pdf
+```
+
+- 纸张支持 `A4`（默认）、`A5`、`Letter`；默认页边距为 18 mm。
+- `--timeout 60` 可延长页面和资源加载等待时间；`--browser /path/to/chrome`
+  可指定已有的 Chrome/Chromium 可执行文件。
+- 本地图片以 Markdown 所在目录为基准，允许其子目录；请把图片放在该目录树内。
+  HTTP(S) 图片需要网络。缺失图片或渲染失败时不会覆盖已有 PDF。
+- 默认将无效公式和缺失引用报告到终端，并保留页面上的错误提示；`--strict` 会拒绝导出。
+- 使用浅色打印样式，去掉侧栏和复制按钮；加载完字体及图片后才打印。
+  长代码行自动换行，超宽独立公式缩小适应纸宽；较长推导建议手动使用 `aligned` 分行。
+- 中文字体使用系统字体；macOS 可使用宋体，Linux 建议安装 `fonts-noto-cjk`。
+  Linux 缺少浏览器系统依赖时，可运行 `python -m playwright install --with-deps chromium --only-shell`。
+- 命令需在本项目内使用，依赖 `md2html.py`、`renderer.js` 和 `assets/vendor/`。
+  输出 PDF 可单独分享，不需要附带这些文件。
+
+Python 调用：
+
+```python
+from pathlib import Path
+from md2pdf import convert
+
+convert(Path("notes.md"), Path("output/notes.pdf"), paper="A4", margin_mm=18, strict=True)
+```
+
 ## 📝 静态博客系统
 
 `blog.py` 把项目扩展为一个完整的**数学博客**：`content/` 目录放文章，一条命令生成整个静态站点。
