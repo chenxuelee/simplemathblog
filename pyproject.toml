@@ -4,3 +4,9 @@ version = "0.1.0"
 description = "Math-aware Markdown reader and static blog generator"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+pdf = ["playwright>=1.58,<2"]
+
+[dependency-groups]
+pdf-test = ["pypdf>=5,<7"]
