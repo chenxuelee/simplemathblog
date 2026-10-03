@@ -109,11 +109,14 @@ def convert(source: Path, output: Path | None = None, *, paper: str = "A4",
         failures: list[str] = []
         with sync_playwright() as playwright:
             try:
-                chromium = playwright.chromium.launch(headless=True, executable_path=browser,
-                                                       timeout=timeout * 1000)
+                chromium = playwright.chromium.launch(
+                    headless=True,
+                    executable_path=browser or os.environ.get("CHROMIUM_EXECUTABLE_PATH") or None,
+                    timeout=timeout * 1000)
             except BrowserError as error:
                 raise RuntimeError("无法启动 Chromium。请运行：uv run --extra pdf python -m "
-                                   "playwright install chromium --only-shell；或用 --browser 指定 Chrome 可执行文件。"
+                                   "playwright install chromium --only-shell；或用 --browser / "
+                                   "CHROMIUM_EXECUTABLE_PATH 指定 Chrome 可执行文件。"
                                    f"\n{error}") from error
             try:
                 page = chromium.new_page(viewport={"width": 1000, "height": 800},
@@ -206,7 +209,7 @@ def main() -> None:
     parser.add_argument("--margin", type=float, default=18, metavar="MM", help="四边页边距，默认 18 mm")
     parser.add_argument("--landscape", action="store_true", help="横向纸张")
     parser.add_argument("--timeout", type=float, default=30, metavar="SECONDS")
-    parser.add_argument("--browser", help="可选：已有 Chrome/Chromium 的可执行文件路径")
+    parser.add_argument("--browser", help="Chrome/Chromium 路径，优先于 CHROMIUM_EXECUTABLE_PATH")
     parser.add_argument("--strict", action="store_true", help="公式、引用或文献错误时拒绝生成 PDF")
     args = parser.parse_args()
     try:

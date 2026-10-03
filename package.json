@@ -1,6 +1,12 @@
 {
   "private": true,
   "scripts": {
+    "dev": "uv run --locked python server.py --watch",
+    "build": "uv run --locked python blog.py --strict",
+    "pdf": "uv run --locked --extra pdf python md2pdf.py",
+    "test": "npm run test:python && npm run test:renderer && npm run test:browser",
+    "test:python": "node scripts/test-python.cjs",
+    "test:renderer": "node --test tests/renderer.test.cjs",
     "test:browser": "playwright test"
   },
   "devDependencies": {
