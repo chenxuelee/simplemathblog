@@ -33,6 +33,53 @@
 
 ## 🚀 快速开始
 
+### 统一开发命令
+
+需要 Python 3.11+、uv 和 Node.js 20+（CI 使用 Node.js 22）。在仓库根目录安装依赖：
+
+```bash
+npm ci
+uv sync --locked --extra pdf --group pdf-test
+npx playwright install chromium
+uv run --locked --extra pdf python -m playwright install chromium --only-shell
+```
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 构建并预览博客，监视源码变化，默认端口 8000 |
+| `npm run build` | 严格构建博客到 `site/` |
+| `npm test` | 运行 Python（含 PDF 集成）、渲染器及浏览器测试；浏览器测试先严格构建站点 |
+| `npm run test:python` | 运行完整 Python 测试，包括 PDF 集成测试 |
+| `npm run test:renderer` | 运行 JavaScript 渲染器测试 |
+| `npm run test:browser` | 运行浏览器测试 |
+| `npm run pdf -- <文件.md>` | 导出 PDF |
+
+通过 `--` 传递原有工具参数，例如：
+
+```bash
+npm run dev -- --port 8080
+npm run build -- --base-url https://example.com/blog --out dist
+npm run pdf -- content/fourier-series.md -o output/notes.pdf --strict
+```
+
+如果已有 Chrome/Chromium，可跳过上述两个浏览器下载命令，设置
+`CHROMIUM_EXECUTABLE_PATH`。浏览器测试和 PDF 导出共用此变量：
+
+```bash
+# macOS/Linux；路径按实际安装位置设置
+export CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+npm test
+npm run pdf -- content/fourier-series.md -o output/notes.pdf
+```
+
+PowerShell 使用 `$env:CHROMIUM_EXECUTABLE_PATH = 'C:\Program Files\Google\Chrome\Application\chrome.exe'`。
+PDF 的 `--browser` 参数（Python API 的 `browser=`）优先于环境变量；
+两者都未设置或环境变量为空时使用 Playwright 管理的 Chromium。PDF 中文排版仍需系统中文字体。
+
+运行完整测试前应停止手动启动的 4173 端口服务，确保浏览器测试使用本次构建。
+仅在已有正确构建产物时设置 `BLOG_SKIP_BUILD=1`；CI 使用独立服务，
+本地测试可复用已有 4173 端口服务。
+
 仅使用阅读器时，无需安装依赖，直接用浏览器打开 `index.html` 即可。
 
 ```bash

@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from md2pdf import ORIGIN, convert, local_resource, validate_options
@@ -36,6 +37,26 @@ class PdfOptionsTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('RUN_PDF_TESTS') == '1', 'Requires PDF extra and Chromium')
 class PdfExportTests(unittest.TestCase):
+    def test_browser_selection_and_explicit_override(self):
+        from playwright.sync_api import Error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'note.md'
+            source.write_text('# Browser selection', encoding='utf-8')
+            for configured, explicit, expected in [
+                ('/system/chromium', None, '/system/chromium'),
+                ('/system/chromium', '/custom/chrome', '/custom/chrome'),
+                ('', None, None),
+            ]:
+                with self.subTest(configured=configured, explicit=explicit):
+                    with patch.dict(os.environ, {'CHROMIUM_EXECUTABLE_PATH': configured}), \
+                            patch('playwright.sync_api.sync_playwright') as factory:
+                        launch = factory.return_value.__enter__.return_value.chromium.launch
+                        launch.side_effect = Error('Browser unavailable')
+                        with self.assertRaisesRegex(RuntimeError, '无法启动 Chromium'):
+                            convert(source, browser=explicit)
+                        self.assertEqual(launch.call_args.kwargs['executable_path'], expected)
+
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
