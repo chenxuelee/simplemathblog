@@ -50,6 +50,7 @@ uv run --locked --extra pdf python -m playwright install chromium --only-shell
 | `npm run build` | 严格构建博客到 `site/` |
 | `npm test` | 运行 Python（含 PDF 集成）、渲染器及浏览器测试；浏览器测试先严格构建站点 |
 | `npm run test:python` | 运行完整 Python 测试，包括 PDF 集成测试 |
+| `npm run test:pdf` | 仅运行 PDF 单元与集成测试（需 PDF 依赖及 Chromium） |
 | `npm run test:renderer` | 运行 JavaScript 渲染器测试 |
 | `npm run test:browser` | 运行浏览器测试 |
 | `npm run pdf -- <文件.md>` | 导出 PDF |
@@ -84,16 +85,16 @@ PDF 的 `--browser` 参数（Python API 的 `browser=`）优先于环境变量�
 
 ```bash
 # 或者本地起个服务（可选）
-uv run python -m http.server 8000 --directory .
+uv run --locked python -m http.server 8000 --directory .
 # 浏览器访问 http://localhost:8000
 ```
 
 预览生成的博客时，可以使用项目内置的无缓存服务器：
 
 ```bash
-uv run python server.py                  # 服务 site/，默认 http://127.0.0.1:8000
-uv run python server.py --build --port 8080  # 先重建，再以 8080 端口服务
-uv run python server.py --watch              # 监视文章与渲染器改动，自动重建
+uv run --locked python server.py                  # 服务 site/，默认 http://127.0.0.1:8000
+uv run --locked python server.py --build --port 8080  # 先重建，再以 8080 端口服务
+uv run --locked python server.py --watch              # 监视文章与渲染器改动，自动重建
 ```
 
 界面按钮：
@@ -114,13 +115,13 @@ uv run python server.py --watch              # 监视文章与渲染器改动，
 
 ```bash
 # 基本用法（输出同名 .html）
-uv run python md2html.py notes.md
+uv run --locked python md2html.py notes.md
 
 # 指定输出路径
-uv run python md2html.py notes.md -o notes_export.html
+uv run --locked python md2html.py notes.md -o notes_export.html
 
 # 指定其他共享渲染器版本
-uv run python md2html.py notes.md --renderer /path/to/renderer.js
+uv run --locked python md2html.py notes.md --renderer /path/to/renderer.js
 ```
 
 导出文件的特点：
@@ -145,22 +146,22 @@ uv run python md2html.py notes.md --renderer /path/to/renderer.js
 首次安装（Python 3.11+）：
 
 ```bash
-uv sync --extra pdf
-uv run --extra pdf python -m playwright install chromium --only-shell
+uv sync --locked --extra pdf
+uv run --locked --extra pdf python -m playwright install chromium --only-shell
 ```
 
 使用方法：
 
 ```bash
 # 默认生成 content/fourier-series.pdf
-uv run --extra pdf python md2pdf.py content/fourier-series.md
+uv run --locked --extra pdf python md2pdf.py content/fourier-series.md
 
 # 指定输出位置，严格检查公式与引用
-uv run --extra pdf python md2pdf.py content/fourier-series.md -o output/notes.pdf --strict
+uv run --locked --extra pdf python md2pdf.py content/fourier-series.md -o output/notes.pdf --strict
 
 # 调整纸张、页边距（毫米）和方向
-uv run --extra pdf python md2pdf.py notes.md -o notes.pdf --paper A5 --margin 15
-uv run --extra pdf python md2pdf.py notes.md --paper Letter --landscape
+uv run --locked --extra pdf python md2pdf.py notes.md -o notes.pdf --paper A5 --margin 15
+uv run --locked --extra pdf python md2pdf.py notes.md --paper Letter --landscape
 ```
 
 也可用 pip 安装依赖后直接执行 `python md2pdf.py`：
@@ -180,26 +181,29 @@ python md2pdf.py notes.md -o notes.pdf
 | `--paper` | `A4` | `A4`、`A5` 或 `Letter` |
 | `--margin` | `18` | 四边页边距，单位 mm |
 | `--landscape` | 关闭 | 横向纸张 |
-| `--timeout` | `30` | 页面及资源等待超时，单位秒 |
+| `--timeout` | `30` | 各浏览器等待阶段及 PDF 生成的超时，单位秒（不是总耗时上限） |
 | `--browser` | Playwright 管理的 Chromium | 已有 Chrome/Chromium 的可执行文件路径 |
 | `--strict` | 关闭 | 数学公式、标签或文献引用有错误时拒绝导出 |
 
 ### 资源与排版
 
 - 页边距至少 10 mm 时显示页码；更小页边距下隐藏页码。
-- `--timeout 60` 可延长页面和资源加载等待时间；`--browser /path/to/chrome`
+- `--timeout 60` 为浏览器启动、导航、资源等待和 PDF 生成分别设置 60 秒上限；`--browser /path/to/chrome`
   可指定已有的 Chrome/Chromium 可执行文件。
 - 本地图片以 Markdown 所在目录为基准，允许其子目录；请把图片放在该目录树内。
   HTTP(S) 图片需要网络。缺失图片或渲染失败时不会覆盖已有 PDF。
 - 默认将无效公式和缺失引用报告到终端，并保留页面上的错误提示；`--strict` 会拒绝导出。
 - 使用浅色打印样式，去掉侧栏和复制按钮；加载完字体及图片后才打印。
-  长代码行自动换行，超宽独立公式缩小适应纸宽；较长推导建议手动使用 `aligned` 分行。
+  长代码行自动换行，超宽独立公式缩小适应纸宽，最低字号为 9 pt。仍过宽时终端报告公式位置与源码片段；
+  普通模式保留警告并导出（公式可能超出纸宽），`--strict` 拒绝导出并保留已有 PDF。请用 `aligned` 分行。
 - 中文字体使用系统字体；macOS 可使用宋体，Linux 建议安装 `fonts-noto-cjk`。
   Linux 缺少浏览器系统依赖时，可运行 `python -m playwright install --with-deps chromium --only-shell`。
 - 命令需在本项目内使用，依赖 `md2html.py`、`renderer.js` 和 `assets/vendor/`。
   输出 PDF 可单独分享，不需要附带这些文件。
 
 ### Python 调用
+
+`convert()` 是同步接口，内部管理异步浏览器；在已有 asyncio 事件循环的应用中，请用 `await asyncio.to_thread(convert, ...)` 调用。
 
 ```python
 from pathlib import Path
@@ -212,7 +216,7 @@ convert(Path("notes.md"), Path("output/notes.pdf"), paper="A4", margin_mm=18, st
 
 | 现象 | 处理方法 |
 | --- | --- |
-| 提示缺少 Playwright | 执行 `uv sync --extra pdf`，并用 `uv run --extra pdf` 运行命令 |
+| 提示缺少 Playwright | 执行 `uv sync --locked --extra pdf`，并用 `uv run --locked --extra pdf` 运行命令 |
 | Chromium 无法启动 | 安装浏览器及系统依赖，或用 `--browser` 指定已有浏览器 |
 | 中文显示为方框 | 安装中文系统字体后重新导出 |
 | 图片加载失败 | 检查相对路径、文件是否在 Markdown 目录树内，以及远程图片是否可访问 |
@@ -226,9 +230,9 @@ HTML 导出和 PDF 导出使用文章内嵌的 BibTeX，不会读取浏览器阅
 `blog.py` 把项目扩展为一个完整的**数学博客**：`content/` 目录放文章，一条命令生成整个静态站点。
 
 ```bash
-uv run python blog.py                              # content/ → site/
-uv run python blog.py --posts myposts --out dist   # 自定义文章/输出目录
-uv run python blog.py --base-url https://example.com  # 生产部署：绝对 RSS/sitemap/SEO URL
+uv run --locked python blog.py                              # content/ → site/
+uv run --locked python blog.py --posts myposts --out dist   # 自定义文章/输出目录
+uv run --locked python blog.py --base-url https://example.com  # 生产部署：绝对 RSS/sitemap/SEO URL
 ```
 
 ### 站点结构
@@ -263,7 +267,7 @@ draft: true                # 草稿：不发布
 
 ### 写作与部署
 
-写作流程：往 `content/` 丢 `.md` → `uv run python blog.py` → 完成。部署只需把 `site/` 上传到任意静态托管（GitHub Pages、Netlify、Vercel 等）。
+写作流程：往 `content/` 丢 `.md` → `uv run --locked python blog.py` → 完成。部署只需把 `site/` 上传到任意静态托管（GitHub Pages、Netlify、Vercel 等）。
 
 示例文章见 `content/fourier-series.md` 与 `banach-fixed-point.md`（覆盖定理环境 + crossref + 数学环境 + Front Matter 的完整用法）。
 
@@ -296,12 +300,28 @@ slug: custom-url
 
 为保护从外部获得的文章，Markdown 链接和图片仅允许普通相对路径、锚点、`http(s)` 与 `mailto`；博客封面仅允许站点内相对路径或 `http(s)` URL。
 
-仓库包含 [GitHub Pages 工作流](.github/workflows/pages.yml)：将默认分支设为 `main`、在仓库设置中启用 GitHub Pages 后，推送会先运行测试、构建 `site/`，再部署页面。
+仓库包含 [GitHub Pages 工作流](.github/workflows/pages.yml)。首次部署：
+
+1. 确认默认分支是 `main`。
+2. 打开仓库 **Settings → Pages → Build and deployment**，将 **Source** 设为 **GitHub Actions**。
+3. 如使用自定义域名，在 **Settings → Secrets and variables → Actions → Variables** 设置 `SITE_BASE_URL`。
+4. 在 **Actions → Check, build and deploy** 手动运行 `main`，或推送到 `main`。
+5. 确认 `build`、`pdf`、`deploy` 全部成功，再访问 Pages 设置显示的站点地址。
+
+若 `configure-pages` 报 `Get Pages site failed / Not Found`，先检查 Pages 是否启用、Source 是否为 GitHub Actions；
+配置正确后仍失败，再检查组织限制和工作流权限。该错误发生在部署配置阶段，与 PDF 测试是否通过是两回事。
+启用 Pages 是仓库设置操作；合并代码不会自动启用它。
+
+`site/` 是可重新生成的构建产物，不纳入 Git。发布使用 CI 当次严格构建上传的 Pages 工件。
+首次预览先运行 `npm run build`，或直接使用会构建站点的 `npm run dev`。
 
 ### 测试
 
+推荐使用快速开始中的 `npm test`，它跨平台运行完整测试并启用 PDF 集成测试。
+下面的直接 unittest 命令默认跳过浏览器 PDF 集成测试，适合快速检查：
+
 ```bash
-uv run python -m unittest discover -s tests -v
+uv run --locked python -m unittest discover -s tests -v
 node --test tests/renderer.test.cjs
 npm ci
 npx playwright install chromium
@@ -311,13 +331,14 @@ npm run test:browser
 PDF 集成测试需要额外安装浏览器和测试依赖：
 
 ```bash
-uv sync --extra pdf --group pdf-test
-uv run --extra pdf python -m playwright install chromium --only-shell
-RUN_PDF_TESTS=1 uv run --extra pdf --group pdf-test python -m unittest discover -s tests -p test_md2pdf.py -v
+uv sync --locked --extra pdf --group pdf-test
+uv run --locked --extra pdf python -m playwright install chromium --only-shell
+RUN_PDF_TESTS=1 uv run --locked --extra pdf --group pdf-test python -m unittest discover -s tests -p test_md2pdf.py -v
 ```
 
-上述环境变量写法适用于 macOS/Linux。测试覆盖中文文本、数学引用跳转、图片、分页、
-横向纸张及失败时保留旧 PDF；普通测试默认跳过需要浏览器的 PDF 集成测试。
+上述环境变量写法适用于 macOS/Linux；Windows 可用 `npm run test:pdf`。测试覆盖中文文本、数学引用跳转、图片、分页、
+横向纸张、超宽公式、字体与资源失败、PDF 生成超时，以及失败时保留旧 PDF。
+直接运行 unittest 时，只有设置 `RUN_PDF_TESTS=1` 才启用浏览器 PDF 集成测试。
 CI 的 `pdf-sample` 工件包含生成的样例 PDF，可用于检查版式。
 
 ### 严格发布检查与 CI
@@ -325,7 +346,7 @@ CI 的 `pdf-sample` 工件包含生成的样例 PDF，可用于检查版式。
 发布前建议运行（需要 Python 3.11+ 和 Node.js）：
 
 ```bash
-uv run python blog.py --strict --base-url https://example.com/blog
+uv run --locked python blog.py --strict --base-url https://example.com/blog
 ```
 
 `--strict` 使用仓库自带的渲染器和固定版本前端库，检查重复标签、未定义的
@@ -342,7 +363,13 @@ uv run python blog.py --strict --base-url https://example.com/blog
 浏览器测试检查最终构建产物；独立 PDF job 检查导出功能并上传样例 PDF。部署等待构建与 PDF 检查成功后，直接复用站点产物。生产地址默认使用项目的
 GitHub Pages 地址；使用自定义域名时设置仓库变量 `SITE_BASE_URL`。
 仍需在 GitHub 仓库设置中启用 Pages，并选择 GitHub Actions 作为发布来源。
-Pylint 在 Python 3.11/3.12 上检查错误级问题；风格告警暂不作为发布门槛。
+Pylint 在 Python 3.11/3.12 上检查错误级问题；依赖来自 `uv.lock`，风格告警暂不作为发布门槛。
+本地复现：
+
+```bash
+uv sync --locked --extra pdf --group pdf-test --group lint
+uv run --locked --extra pdf --group pdf-test --group lint pylint --errors-only *.py tests/*.py
+```
 
 阅读器、博客、HTML 和 PDF 导出共用 `prepareDocument()`：代码先隔离，文献按源码
 顺序编号（缺失文献保留编号槽位），公式引用具有真实跳转锚点。
@@ -500,7 +527,7 @@ LaTeX 用户熟悉的引用系统完整移植：
 
 ## 🧮 内置宏
 
-可在源码顶部的 `MACROS` 对象中扩展：
+可在 `renderer.js` 中的 `MACROS` 对象中扩展；阅读器、博客和导出工具共用此定义：
 
 | 宏 | 展开 | 宏 | 展开 |
 |---|---|---|---|
@@ -540,7 +567,10 @@ simplemathblog/
 ├── frontmatter.py # Python 元数据解析
 ├── tests/        # Python、渲染、浏览器与 PDF 回归测试
 ├── pyproject.toml # Python 可选依赖与测试依赖
-├── uv.lock       # Python 依赖锁文件
+├── uv.lock       # Python 依赖锁文件（含 PDF 测试和 lint）
+├── package.json / package-lock.json # 统一命令与 Node.js 依赖
+├── scripts/      # 跨平台测试入口与渲染校验
+├── .github/workflows/ # 检查、构建、PDF 测试与 Pages 部署
 ├── blog.py       # 静态博客系统：content/ → site/（首页/归档/文章页）
 ├── assets/vendor/ # 固定版本的 marked、KaTeX、highlight.js 运行时资源
 ├── content/      # 博客文章目录（.md，含示例文章）

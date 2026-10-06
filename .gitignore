@@ -10,3 +10,7 @@ __pycache__/
 node_modules/
 test-results/
 playwright-report/
+
+# Generated static site and local export output
+site/
+output/

@@ -6,6 +6,7 @@
     "pdf": "uv run --locked --extra pdf python md2pdf.py",
     "test": "npm run test:python && npm run test:renderer && npm run test:browser",
     "test:python": "node scripts/test-python.cjs",
+    "test:pdf": "node scripts/test-python.cjs --pdf-only",
     "test:renderer": "node --test tests/renderer.test.cjs",
     "test:browser": "playwright test"
   },
