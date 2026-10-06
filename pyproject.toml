@@ -10,3 +10,4 @@ pdf = ["playwright>=1.58,<2"]
 
 [dependency-groups]
 pdf-test = ["pypdf>=5,<7"]
+lint = ["pylint>=3.3,<4"]

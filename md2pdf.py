@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Export enhanced Markdown to PDF using the shared renderer and Chromium.
 
-    uv sync --extra pdf
-    uv run --extra pdf python -m playwright install chromium --only-shell
-    uv run --extra pdf python md2pdf.py content/fourier-series.md -o notes.pdf
+    uv sync --locked --extra pdf
+    uv run --locked --extra pdf python -m playwright install chromium --only-shell
+    uv run --locked --extra pdf python md2pdf.py content/fourier-series.md -o notes.pdf
 """
 
 import argparse
+import asyncio
 import math
 import mimetypes
 import os
@@ -95,11 +96,20 @@ def convert(source: Path, output: Path | None = None, *, paper: str = "A4",
     Local images resolve relative to the Markdown file. Chromium and a Chinese
     system font are needed for Chinese documents. No web server is opened.
     """
+    return asyncio.run(_convert(source, output, paper=paper, margin_mm=margin_mm,
+                                landscape=landscape, timeout=timeout,
+                                browser=browser, strict=strict))
+
+
+async def _convert(source: Path, output: Path | None, *, paper: str,
+                   margin_mm: float, landscape: bool, timeout: float,
+                   browser: str | None, strict: bool) -> Path:
+    """Run Playwright on one event loop so PDF generation can be cancelled."""
     source = Path(source).expanduser().resolve()
     output = Path(output).expanduser().resolve() if output else source.with_suffix(".pdf")
     validate_options(source, output, paper, margin_mm, timeout)
     try:
-        from playwright.sync_api import Error as BrowserError, sync_playwright
+        from playwright.async_api import Error as BrowserError, async_playwright
     except ImportError as error:
         raise RuntimeError("请先安装 PDF 依赖：uv sync --extra pdf") from error
 
@@ -107,9 +117,9 @@ def convert(source: Path, output: Path | None = None, *, paper: str = "A4",
         html_dir = Path(scratch)
         convert_html(source, html_dir / "document.html", DEFAULT_RENDERER)
         failures: list[str] = []
-        with sync_playwright() as playwright:
+        async with async_playwright() as playwright:
             try:
-                chromium = playwright.chromium.launch(
+                chromium = await playwright.chromium.launch(
                     headless=True,
                     executable_path=browser or os.environ.get("CHROMIUM_EXECUTABLE_PATH") or None,
                     timeout=timeout * 1000)
@@ -119,76 +129,94 @@ def convert(source: Path, output: Path | None = None, *, paper: str = "A4",
                                    "CHROMIUM_EXECUTABLE_PATH 指定 Chrome 可执行文件。"
                                    f"\n{error}") from error
             try:
-                page = chromium.new_page(viewport={"width": 1000, "height": 800},
-                                         color_scheme="light", device_scale_factor=1)
+                page = await chromium.new_page(viewport={"width": 1000, "height": 800},
+                                               color_scheme="light", device_scale_factor=1)
                 page.set_default_timeout(timeout * 1000)
+                page.set_default_navigation_timeout(timeout * 1000)
                 page.on("pageerror", lambda error: failures.append(str(error)))
 
-                def serve(route):
+                async def serve(route):
                     try:
                         asset = local_resource(route.request.url, source.parent, html_dir)
                         if asset is None:
-                            route.continue_()
+                            await route.continue_()
                         else:
                             content_type = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
-                            route.fulfill(path=str(asset), content_type=content_type)
+                            await route.fulfill(path=str(asset), content_type=content_type)
                     except (ValueError, OSError) as error:
                         failures.append(str(error))
-                        route.abort()
+                        await route.abort()
 
-                page.route("**/*", serve)
-                page.goto(f"{ORIGIN}/document.html", wait_until="load")
+                await page.route("**/*", serve)
+                await page.goto(f"{ORIGIN}/document.html", wait_until="load")
                 if failures:
                     raise RuntimeError("页面渲染失败：\n" + "\n".join(failures))
-                page.emulate_media(media="print", color_scheme="light")
-                page.add_style_tag(content=PRINT_CSS)
+                await page.emulate_media(media="print", color_scheme="light")
+                await page.add_style_tag(content=PRINT_CSS)
                 width, height = PAPER_SIZES[paper]
                 if landscape:
                     width, height = height, width
                 content_width = (width - 2 * margin_mm) * 96 / 25.4
-                page.add_style_tag(content=f"#container {{ width: {content_width}px; }} "
-                                   f"img {{ max-height: {height - 2 * margin_mm - 20}mm; }}")
+                await page.add_style_tag(content=f"#container {{ width: {content_width}px; }} "
+                                         f"img {{ max-height: {height - 2 * margin_mm - 20}mm; }}")
                 # Lazy images below the initial viewport must be loaded before printing.
-                page.eval_on_selector_all("img", "images => images.forEach(img => img.loading = 'eager')")
-                page.wait_for_function("Array.from(document.images).every(img => img.complete)")
-                broken = page.eval_on_selector_all("img", "images => images.filter(img => !img.naturalWidth).map(img => img.getAttribute('src'))")
+                await page.eval_on_selector_all("img", "images => images.forEach(img => img.loading = 'eager')")
+                await page.wait_for_function("Array.from(document.images).every(img => img.complete)")
+                broken = await page.eval_on_selector_all("img", "images => images.filter(img => !img.naturalWidth).map(img => img.getAttribute('src'))")
                 if broken or failures:
                     raise RuntimeError("图片或资源加载失败：\n" + "\n".join(broken + failures))
-                page.wait_for_function("document.fonts.status === 'loaded'")
+                await page.wait_for_function("document.fonts.status === 'loaded'")
                 # A complete font face may still have failed; do not silently print broken math.
-                bad_fonts = page.evaluate("Array.from(document.fonts).filter(font => font.status === 'error').map(font => font.family)")
+                bad_fonts = await page.evaluate("Array.from(document.fonts).filter(font => font.status === 'error').map(font => font.family)")
                 if bad_fonts:
                     raise RuntimeError("字体加载失败：" + ", ".join(bad_fonts))
-                diagnostics = page.evaluate("renderDiagnostics")
+                diagnostics = await page.evaluate("renderDiagnostics")
                 if diagnostics:
                     message = "数学渲染提示：\n" + "\n".join(diagnostics)
                     if strict:
                         raise RuntimeError(message)
                     print(message, file=sys.stderr)
-                # Fit wide display equations to the printable column, not the screen viewport.
-                page.eval_on_selector_all(".katex-display", """blocks => blocks.forEach(block => {
-                  const math = block.querySelector('.katex');
-                  if (math && math.scrollWidth > block.clientWidth) {
+                # Keep equations at least 9 pt; report anything still too wide.
+                layout_diagnostics = await page.eval_on_selector_all(".katex-display", """blocks => {
+                  const diagnostics = [];
+                  blocks.forEach((block, index) => {
+                    const math = block.querySelector('.katex');
+                    if (!math || math.scrollWidth <= block.clientWidth) return;
                     const size = parseFloat(getComputedStyle(math).fontSize);
-                    math.style.fontSize = `${size * block.clientWidth / math.scrollWidth}px`;
-                  }
-                })""")
-                page.eval_on_selector_all("a[href]", """(links, base) => links.forEach(link => {
+                    math.style.fontSize = `${Math.max(12, size * block.clientWidth / math.scrollWidth)}px`;
+                    if (math.scrollWidth > block.clientWidth + 1) {
+                      const tex = math.querySelector('annotation[encoding="application/x-tex"]');
+                      const label = block.id || `第 ${index + 1} 个显示公式`;
+                      diagnostics.push(`公式过宽（最低 9 pt）：${label} — ${(tex?.textContent || '').slice(0, 160)}；请用 aligned 分行`);
+                    }
+                  });
+                  return diagnostics;
+                }""")
+                if layout_diagnostics:
+                    message = "PDF 排版提示：\n" + "\n".join(layout_diagnostics)
+                    if strict:
+                        raise RuntimeError(message)
+                    print(message, file=sys.stderr)
+                await page.eval_on_selector_all("a[href]", """(links, base) => links.forEach(link => {
                   const href = link.getAttribute('href');
                   if (href && !href.startsWith('#') && new URL(href, location.href).origin === location.origin)
                     link.href = new URL(href, base).href;
                 })""", source.parent.as_uri() + "/")
-                data = page.pdf(format=paper, landscape=landscape,
-                                margin={side: f"{margin_mm}mm" for side in ("top", "right", "bottom", "left")},
-                                print_background=True, tagged=True, outline=True,
-                                display_header_footer=margin_mm >= 10,
-                                header_template="<span></span>",
-                                footer_template='<div style="width:100%;text-align:center;font-size:9px;color:#777">'
-                                                '<span class="pageNumber"></span> / <span class="totalPages"></span></div>')
+                data = await asyncio.wait_for(
+                    page.pdf(format=paper, landscape=landscape,
+                             margin={side: f"{margin_mm}mm" for side in ("top", "right", "bottom", "left")},
+                             print_background=True, tagged=True, outline=True,
+                             display_header_footer=margin_mm >= 10,
+                             header_template="<span></span>",
+                             footer_template='<div style="width:100%;text-align:center;font-size:9px;color:#777">'
+                                              '<span class="pageNumber"></span> / <span class="totalPages"></span></div>'),
+                    timeout=timeout)
+            except TimeoutError as error:
+                raise RuntimeError(f"PDF 生成超时（{timeout:g} 秒，可用 --timeout 增加等待时间）") from error
             except BrowserError as error:
                 raise RuntimeError(f"浏览器导出失败（可用 --timeout 增加等待时间）：{error}") from error
             finally:
-                chromium.close()
+                await chromium.close()
         output.parent.mkdir(parents=True, exist_ok=True)
         # Same-directory staging makes replacement atomic, including on Windows.
         with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".pdf", delete=False) as staged:
